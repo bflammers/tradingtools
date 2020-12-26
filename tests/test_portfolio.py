@@ -1,107 +1,140 @@
-
+from numpy.core.fromnumeric import shape
 import pandas as pd
 import numpy as np
-import copy
-import pytest
 
-from tradingtools import portfolio
+from tradingtools.portfolio import Portfolio
 
 
-start_positions = [
-    {
-        'symbol': 'BTCUSD',
-        'timestamp_execution': pd.Timestamp("2017-01-01 12:00:00"),
-        'volume': 10,
-        'price_execution': 100,
-        'timestamp_settlement': pd.Timestamp("2017-01-01 12:00:02"),
-        'price_settlement': 101
-    }, {
-        'symbol': 'ETHUSD',
-        'timestamp_execution': pd.Timestamp("2017-01-03 12:00:00"),
-        'volume': 10,
-        'price_execution': 120,
-        'timestamp_settlement': pd.Timestamp("2017-01-03 12:00:02"),
-        'price_settlement': 121
-    }, {
-        'symbol': 'ETHUSD',
-        'timestamp_execution': pd.Timestamp("2017-01-10 12:00:00"),
-        'volume': -10,
-        'price_execution': 120,
-        'timestamp_settlement': pd.Timestamp("2017-01-10 12:00:02"),
-        'price_settlement': 101
-    }, 
-    {
-        'symbol': 'BTCUSD',
-        'timestamp_execution': pd.Timestamp("2017-01-21 12:00:00"),
-        'volume': -5,
-        'price_execution': 90,
-        'timestamp_settlement': pd.Timestamp("2017-01-21 12:00:02"),
-        'price_settlement': 87
+def test_update():
+
+    # Init empty portfolio
+
+    pf = Portfolio(start_capital=100)
+
+    # Add single position
+
+    optimal_positions = [{"symbol": "BTCUSD", "volume": 1}]
+
+    prices = {
+        "BTCUSD": 10,
+        "ETHUSD": 20,
     }
-]
 
-df_start = pd.DataFrame(start_positions)
-pf = portfolio.Portfolio(df_start)
+    pf.update(prices, optimal_positions)
+    positions = pf.get_optimal_positions()
+    orders = pf.get_orders()
 
-
-def test_add_order():
-
-    pf2 = copy.deepcopy(pf)
-
-    shape_before = pf2.get_orders().shape
-
-    pf2.add_order(
-        symbol="BTCUSD",
-        timestamp_execution=pd.Timestamp("2017-01-30 12:00:00"),
-        volume=10,
-        price_execution=100,
-        timestamp_settlement=pd.Timestamp("2017-01-30 12:00:02"),
-        price_settlement=101
+    assert positions.shape == (1, 3)
+    assert orders.shape[0] == 1
+    np.testing.assert_equal(
+        orders[["symbol", "price_execution", "order_type", "volume"]].values,
+        np.array([["BTCUSD", 10.0, "buy", 1.0]], dtype=np.object),
     )
-    df = pf2.get_orders()
-   
-    assert df.shape == (shape_before[0] + 1, shape_before[1])
-    assert df['symbol'].iloc[-1] == "BTCUSD"
-    assert df['timestamp_execution'].iloc[-1] == pd.Timestamp("2017-01-30 12:00:00")
-    assert df['volume'].iloc[-1] == 10
-    assert df['price_execution'].iloc[-1] == 100
 
-    with pytest.raises(Exception):
-        pf2.add_order(
-            symbol="BTCUSD",
-            timestamp_execution=pd.Timestamp("2017-01-30 12:00:00"),
-            volume=-100,
-            price_execution=100,
-            timestamp_settlement=pd.Timestamp("2017-01-30 12:00:02"),
-            price_settlement=101
+    # Add second position
+
+    optimal_positions = [
+        {"symbol": "BTCUSD", "volume": 1},
+        {"symbol": "ETHUSD", "volume": 2},
+    ]
+
+    orders = pf.update(prices, optimal_positions)
+    positions = pf.get_optimal_positions()
+    orders = pf.get_orders()
+
+    assert positions.shape == (2, 4)
+    assert orders.shape[0] == 2
+    np.testing.assert_equal(
+        orders[["symbol", "price_execution", "order_type", "volume"]].values,
+        np.array(
+            [["BTCUSD", 10.0, "buy", 1.0], ["ETHUSD", 20.0, "buy", 2.0]],
+            dtype=np.object,
+        ),
+    )
+
+    # Set both positions to zero
+
+    optimal_positions = [
+        {"symbol": "BTCUSD", "volume": 0},
+        {"symbol": "ETHUSD", "volume": 0},
+    ]
+
+    pf.update(prices, optimal_positions)
+    positions = pf.get_optimal_positions()
+    orders = pf.get_orders()
+
+    # print("\npositions:\n", positions)
+    # print("\norders:\n", orders)
+
+    assert positions.shape == (3, 4)
+    assert orders.shape[0] == 4
+    np.testing.assert_equal(
+        orders[["symbol", "price_execution", "order_type", "volume"]].values,
+        np.array(
+            [
+                ["BTCUSD", 10.0, "buy", 1.0],
+                ["ETHUSD", 20.0, "buy", 2.0],
+                ["BTCUSD", 10.0, "sell", 1.0],
+                ["ETHUSD", 20.0, "sell", 2.0],
+            ],
+            dtype=np.object,
+        ),
+    )
+
+    np.testing.assert_equal(
+        positions[["BTCUSD", "ETHUSD"]].values[-1], np.array([0.0, 0.0])
+    )
+
+
+def test_full_update_cycle():
+
+    # Init empty portfolio
+
+    pf = Portfolio(start_capital=100)
+
+    # Add single position
+
+    optimal_positions = [
+        {"symbol": "BTCUSD", "volume": 1},
+        {"symbol": "ETHUSD", "volume": 4},
+    ]
+
+    prices = {
+        "BTCUSD": 10,
+        "ETHUSD": 20,
+    }
+
+    orders = pf.update(prices, optimal_positions)
+
+    for order in orders:
+        pf.add_settlement(
+            order["order_id"], prices[order["symbol"]], pd.Timestamp.now()
         )
 
-def test_get_positions():
+    pnl = pf.profit_and_loss()
 
-    pf2 = copy.deepcopy(pf)
+    assert pnl["start_capital"] == 100
+    assert pnl['unallocated'] == 10
+    assert pnl['total_value'] == 100
+    assert pnl['profit_percentage'] == 0
 
-    df_net = pf2.get_positions()
-    print(df_net)
-    
-    assert df_net['volume'][0] == 5
-    assert df_net['volume'][1] == 0
+    prices = {
+        "BTCUSD": 20,
+        "ETHUSD": 40,
+    }
 
-    # Add position to make position neutral
-    pf2.add_order(
-        symbol="BTCUSD",
-        timestamp_execution=pd.Timestamp("2017-02-03 12:00:00"),
-        volume=-5,
-        price_execution=100,
-        timestamp_settlement=pd.Timestamp("2017-02-03 12:00:02"),
-        price_settlement=101
-    )
+    orders = pf.update(prices)
+    pnl = pf.profit_and_loss()
 
-    df_net = pf2.get_positions()
-    
-    assert df_net['volume'][0] == 0
-    assert df_net['volume'][1] == 0
+    assert pnl["start_capital"] == 100
+    assert pnl['unallocated'] == 10
+    assert pnl['total_value'] == 190
+    assert pnl['profit_percentage'] == 90
+
+
 
 
 if __name__ == "__main__":
-    test_get_positions()
-    print(pf)
+
+    test_update()
+    test_full_update_cycle()

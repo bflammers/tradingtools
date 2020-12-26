@@ -52,29 +52,42 @@ class Pipeline:
         for tick in self.ticker:
             self.single_run(tick, backtest)
 
-    def single_run(self, tick: dict, backtest: bool = False) -> None:
+    def single_run(self, tick: list, backtest: bool = False) -> None:
 
-        # Pass to strategy -> optimal_position
-        optimal_position = self.strategy.execute_on_tick(tick)
-        order = [("BTCUSD", 10), ("ETHUSD", 0)]
+        # [{'symbol': 'BTCUSD', 'open': 3902.52, 'high': 3908.0, 'low': 3902.25, 'close': 3902.25, 'volume': 0.25119066, 'timestamp': Timestamp('2019-01-02 23:25:00')}
+
+        # Pass to strategy -> optimal_positions
+        optimal_positions = self.strategy.execute_on_tick(tick)
+        optimal_positions = [
+            {"symbol": "BTCUSD", "volume": 10},
+            {"symbol": "ETHUSD", "volume": 0},
+        ]
+        prices = self._extract_prices(tick)
 
         # Pass to risk management -> optimal_position
         pass
 
         # Pass to porfolio -> order
-        order = self.portfolio.update(optimal_position)
-        order = [("BTCUSD", "buy", 10), ("ETHUSD", "sell", 5)]
-
-        # Pass to broker -> settlement back to portfolio
-        settlement = self.broker.place_order(order, backtest)
-        settlement = [
-            ("order_id", "ex_timestamp", "ex_price"),
-            ("order_id", "ex_timestamp", "ex_price"),
+        orders = self.portfolio.update(prices, optimal_positions)
+        orders = [
+            {"symbol": "BTCUSD", "order_type": "buy", "volume": 10},
+            {"symbol": "ETHUSD", "order_type": "sell", "volume": 5},
         ]
-        self.portfolio.add_settlement(settlement)
+        print(orders)
+        # Pass to broker -> settlement back to portfolio
+        settlement = self.broker.place_order(orders, backtest)
+        settlement = [
+            {"order_id": "2jdiejd", "timestamp": "2020-10-10 11:10", "price": 189.90},
+            {"order_id": "0i3ek3m", "timestamp": "2020-10-10 11:10", "price": 129.00},
+        ]
+        self.portfolio.add_settlement()
 
         # Increment counter
         self.i += 1
+
+    @staticmethod
+    def _extract_prices(tick):
+        return {t['symbol']: t['close'] for t in tick}
 
 
 if __name__ == "__main__":

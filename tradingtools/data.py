@@ -56,13 +56,13 @@ class HistoricalOHLCLoader(DataLoader):
         # Modifying df
         self.df.columns = map(str.lower, self.df.columns)
         self.df["timestamp"] = pd.to_datetime(self.df["date"])
-        self.df = self.df.set_index("timestamp")
+        self.df = self.df.set_index("timestamp", drop=False)
         self.df = self.df.drop(columns=["date", "unix timestamp"])
 
     def get_ticker(self) -> Generator:
         for index, row in self.df.iterrows():
             print(f"[Dataloader] >> processing row {index}/{self.n} >> {row.name}")
-            yield row.to_dict()
+            yield [row.to_dict()]
 
     def _resample_df(self, freq: str = "5T") -> None:
         self.df = self.df.resample(freq, label="right", closed="right").agg(
@@ -102,11 +102,10 @@ if __name__ == "__main__":
 
     p = "./data/cryptodatadownload/gemini/price"
 
-    dl = HistoricalOHLCLoader("BTCUSD", p)
+    dl = HistoricalOHLCLoader("BTCUSD", p, "2019")
     dl.df.head()
 
     ticker = dl.get_ticker()
 
     for i, t in enumerate(ticker):
         print(t)
-        print(type(t))
