@@ -44,69 +44,72 @@ class Pipeline:
         self.i = 0
         self.ticker = self.dataloader.get_ticker()
 
-    def run(self, backtest=True) -> None:
+    def run(self) -> None:
 
         if self.ticker is None:
             raise Exception("First initialize ticker")
 
         for tick in self.ticker:
-            self.single_run(tick, backtest)
 
-    def single_run(self, tick: list, backtest: bool = False) -> None:
+            # Pass to strategy -> optimal_positions
+            optimal_positions = self.strategy.execute_on_tick(tick)
+        
+            # Pass to porfolio -> order
+            orders = self.portfolio.update(tick, optimal_positions)
 
-        # [{'symbol': 'BTCUSD', 'open': 3902.52, 'high': 3908.0, 'low': 3902.25, 'close': 3902.25, 'volume': 0.25119066, 'timestamp': Timestamp('2019-01-02 23:25:00')}
+            for order in orders:
 
-        # Pass to strategy -> optimal_positions
-        optimal_positions = self.strategy.execute_on_tick(tick)
-        optimal_positions = [
-            {"symbol": "BTCUSD", "volume": 10},
-            {"symbol": "ETHUSD", "volume": 0},
-        ]
-        prices = self._extract_prices(tick)
+                # ASYNC! -> callback to add_settlement
 
-        # Pass to risk management -> optimal_position
-        pass
+                # Pass to broker -> settlement back to portfolio
+                settlement = self.broker.place_order(order, tick)
 
-        # Pass to porfolio -> order
-        orders = self.portfolio.update(prices, optimal_positions)
-        orders = [
-            {"symbol": "BTCUSD", "order_type": "buy", "volume": 10},
-            {"symbol": "ETHUSD", "order_type": "sell", "volume": 5},
-        ]
-        print(orders)
-        # Pass to broker -> settlement back to portfolio
-        settlement = self.broker.place_order(orders, backtest)
-        settlement = [
-            {"order_id": "2jdiejd", "timestamp": "2020-10-10 11:10", "price": 189.90},
-            {"order_id": "0i3ek3m", "timestamp": "2020-10-10 11:10", "price": 129.00},
-        ]
-        self.portfolio.add_settlement()
+                self.portfolio.add_settlement(
+                    order_id=settlement["order_id"],
+                    price=settlement["price"],
+                    fee=settlement["fee"],
+                    timestamp_settlement=settlement["timestamp"],
+                )
 
-        # Increment counter
-        self.i += 1
+            # Increment counter
+            self.i += 1
 
-    @staticmethod
-    def _extract_prices(tick):
-        return {t['symbol']: t['close'] for t in tick}
+            if self.i % 1000 == 0:
+                print(self.portfolio)
+                print(self.dataloader)
 
 
 if __name__ == "__main__":
 
+    import signal
+
+    def quit_gracefully(*args):
+        print('quitting loop')
+        exit(0)
+
+    signal.signal(signal.SIGINT, quit_gracefully)
+
     try:
         from .data import HistoricalOHLCLoader
         from .strategy import MovingAverageCrossOverSingle
-    except ModuleNotFoundError:
+    except ImportError:
         from data import HistoricalOHLCLoader
         from strategy import MovingAverageCrossOverSingle
 
-    p = "./data/cryptodatadownload/gemini/price"
-    dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern="2019")
+    try: 
 
-    strat = MovingAverageCrossOverSingle(symbol="BTCUSD")
-    pf = Portfolio()
-    brkr = Broker()
+        p = "./data/cryptodatadownload/gemini/price"
+        dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern="2020")
 
-    pipeline = Pipeline(dataloader=dl, strategy=strat, portfolio=pf, broker=brkr)
+        strat = MovingAverageCrossOverSingle(symbol="BTCUSD")
+        pf = Portfolio(5000)
+        brkr = Broker()
 
-    pipeline.initialize_ticker()
-    pipeline.run()
+        pipeline = Pipeline(dataloader=dl, strategy=strat, portfolio=pf, broker=brkr)
+
+        pipeline.initialize_ticker()
+
+        pipeline.run()
+
+    except KeyboardInterrupt:
+        quit_gracefully()

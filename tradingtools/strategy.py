@@ -1,17 +1,19 @@
+
 import pandas as pd
 import numpy as np
-
+from collections import deque
 
 class Strategy:
     def __init__(self) -> None:
         self.i = 0
 
-    def execute_on_tick(self, tick: dict, context: dict = None) -> list:
+    def execute_on_tick(self, tick: list, context: dict = None) -> list:
         """Executes the strategy on each tick of data (ohlc + extra context)
-        manages its own state and produces an optimal portfolio allocation
+        manages its own state and produces a list of optimal portfolio allocations
+        with one element per symbol
 
         Args:
-            tick (dict): ohlc data
+            tick (list): list of ohlc data
             context (dict): contextual data
 
         Raises:
@@ -28,38 +30,69 @@ class MovingAverageCrossOverSingle(Strategy):
         self.n_long = n_long
 
         # Initialize arrays
-        self.short_list = np.zeros(self.n_short)
-        self.long_list = np.zeros(self.n_long)
-        self.open_pos = False
+        self.short_que = deque(self.n_short* [0.0], maxlen=self.n_short)
+        self.long_que = deque(self.n_long* [0.0], maxlen=self.n_long)
 
-    def execute_on_tick(self, tick) -> list:
+        self.x = 0
+
+    def execute_on_tick(self, tick: list) -> list:
+
+        # Hacky - but works for now
+        tick = [x for x in tick if x["symbol"] == self.symbol][0]
 
         # Skip first 300 days to get full windows
         self.i += 1
 
+        return self._execute(tick['close'])
+
+    def _execute(self, x):
+
+        # Moving average
+        self.x = self.x * (99/100) + x * (1/100)
+
         # Update lists with latest Closing price
-        self.short_list = np.append(self.short_list[1:], tick["close"])
-        self.long_list = np.append(self.long_list[1:], tick["close"])
+        self.long_que.append(self.x)
+        self.short_que.append(self.x)
 
         # Calculate means
-        short_mavg = self.short_list.mean()
-        long_mavg = self.long_list.mean()
+        short_mavg = np.mean(self.short_que)
+        long_mavg = np.mean(self.long_que)
 
         # Trading logic
-        if self.i > 300:
-            if short_mavg > long_mavg and not self.open_pos:
-                self.open_pos = True
-                return [(self.symbol, 10)]
-            elif short_mavg < long_mavg and self.open_pos:
-                self.open_pos = False
-                return [(self.symbol, 0)]
+        if self.i > self.n_long:
+            if short_mavg > long_mavg:
+                return [{"symbol": self.symbol, "volume": 0.1}]        
 
-        return []
+        return [{"symbol": self.symbol, "volume": 0}]
 
 
 if __name__ == "__main__":
 
     strat = MovingAverageCrossOverSingle("BTCUSD")
 
-    for i in range(310):
-        strat.execute_on_tick(pd.Series({"close": 100}))
+    tick = [
+        {
+            "symbol": "BTCUSD",
+            "open": 3902.52,
+            "high": 3908.0,
+            "low": 3902.25,
+            "close": 3902.25,
+            "volume": 0.25119066,
+            "timestamp": "2019-01-02 23:25:00",
+        },
+        {
+            "symbol": "ETHUSD",
+            "open": 3902.52,
+            "high": 3908.0,
+            "low": 3902.25,
+            "close": 3902.25,
+            "volume": 0.25119066,
+            "timestamp": "2019-01-02 23:25:00",
+        },
+    ]
+
+    for i in range(301):
+        optimal_positions = strat.execute_on_tick(tick)
+
+        if optimal_positions[0]['volume'] > 0:
+            print(f"{i} - {optimal_positions}")

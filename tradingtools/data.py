@@ -8,11 +8,13 @@ import numpy as np
 
 
 class DataLoader:
-    def __init__(self, symbol: str) -> None:
+    def __init__(self, symbol: str, verbose: bool = False) -> None:
         super().__init__()
 
         self.df = None
         self.symbol = symbol
+        self._verbose = verbose
+        self._i = 0
 
     def get_ticker(self) -> Generator:
         raise NotImplementedError("Base class")
@@ -26,8 +28,10 @@ class DataLoader:
 
 
 class HistoricalOHLCLoader(DataLoader):
-    def __init__(self, symbol: str, path: str, extra_pattern: str = None) -> None:
-        super().__init__(symbol)
+    def __init__(
+        self, symbol: str, path: str, extra_pattern: str = None, verbose: bool = False
+    ) -> None:
+        super().__init__(symbol, verbose)
 
         self._load_price_data(path, extra_pattern)
 
@@ -60,8 +64,11 @@ class HistoricalOHLCLoader(DataLoader):
         self.df = self.df.drop(columns=["date", "unix timestamp"])
 
     def get_ticker(self) -> Generator:
-        for index, row in self.df.iterrows():
-            print(f"[Dataloader] >> processing row {index}/{self.n} >> {row.name}")
+        for self._i, (index, row) in enumerate(self.df.iterrows()):
+
+            if self._verbose:
+                print(f"[Dataloader] >> processing row {self._i}/{self.n} >> {index}")
+            
             yield [row.to_dict()]
 
     def _resample_df(self, freq: str = "5T") -> None:
@@ -82,6 +89,10 @@ class HistoricalOHLCLoader(DataLoader):
                 "volume_sum": "volume",
             }
         )
+
+    def __str__(self) -> str:
+        row = self.df.iloc[self._i]
+        return f"[Dataloader] >> processing row {self._i}/{self.n} >> {row.name}"
 
 
 class CombinationLoader(DataLoader):

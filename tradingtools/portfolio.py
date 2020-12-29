@@ -1,22 +1,27 @@
-from numpy.core.fromnumeric import squeeze
 import pandas as pd
 import numpy as np
 import uuid
 
-from pandas.core import groupby
-
 
 try:
-    from .utils import colors, timestamp_to_string, string_to_timestamp
+    from .utils import (
+        colors,
+        extract_prices,
+        warnings,
+    )
 except:
-    from utils import colors, timestamp_to_string, string_to_timestamp
+    from utils import (
+        colors,
+        extract_prices,
+        warnings,
+    )
 
 
 class Portfolio:
     def __init__(self, start_capital) -> None:
         super().__init__()
 
-        self._current_positions = []
+        self._current_optimal_positions = []
         self._opt_positions_fixed_columns = ["positions_id", "timestamp"]
         self._opt_positions = pd.DataFrame(columns=self._opt_positions_fixed_columns)
 
@@ -24,21 +29,25 @@ class Portfolio:
             columns=[
                 "order_id",
                 "symbol",
-                "timestamp_execution",
-                "price_execution",
+                "status",
                 "order_type",
                 "volume",
+                "timestamp",
+                "timestamp_execution",
                 "timestamp_settlement",
+                "price_execution",
                 "price_settlement",
+                "fee",
                 "slippage",
             ]
         )
 
         self._assets = dict()
+        self._prices = dict()
         self._start_capital = start_capital
         self._unallocated_capital = start_capital
 
-    def update(self, prices: dict, optimal_positions: list = None) -> list:
+    def update(self, tick: list, optimal_positions: list = []) -> list:
 
         """Update the portfolio using the new optimal positions (from strategy)
         and most recent prices. The optimal positions only trigger an order request
@@ -56,74 +65,69 @@ class Portfolio:
         #     {"symbol": "ETHUSD", "volume": 0},
         # ]
 
-        if (
-            optimal_positions is not None
-            and optimal_positions != self._current_positions
-        ):
+        # Update latest prices of assets
+        self._update_asset_prices(tick)
+
+        # If optimal position is not equal to the current position we will update
+        if optimal_positions != self._current_optimal_positions:
+
+            timestamp = pd.Timestamp(tick[0]["timestamp"])
 
             # Update positions
-            timestamp_execution = self._update_positions(optimal_positions, prices)
+            self._update_optimal_positions(optimal_positions, timestamp)
 
             # Set dict of deltas per symbol
             delta = self._calculate_delta()
 
             # Prepare order lists
-            orders = self._construct_orders(delta, prices, timestamp_execution)
+            orders = self._construct_orders(delta, timestamp)
 
             return orders
-
-        # Update assets using current prices
-        self._update_asset_values(prices)
 
         # Return empty orders list
         return []
 
-    def _update_positions(self, new_positions: dict, prices: dict) -> str:
+    def _update_asset_prices(self, tick: list) -> None:
+
+        # Extract closing prices
+        self._prices = extract_prices(tick, "close")
+
+        # Update asset prices
+        for symbol, details in self._assets.items():
+
+            # Determine new value based on prices and volume
+            value_current = details["volume"] * self._prices[symbol]
+            self._assets[symbol]["value_current"] = value_current
+
+    def _update_optimal_positions(
+        self, new_positions: dict, timestamp: pd.Timestamp
+    ) -> None:
 
         """Internal method to update the intended positions. Note that this method
         only updates the "ideal" positions, and not the actual orders that will be
         created for the broker (these will be created through the _construct_orders method)
-
-        Returns:
-            str: execution timestamp string
         """
 
-        # Determine meta settings
-        idx = self._opt_positions.shape[0]
-        positions_id = uuid.uuid4().hex
-        timestamp_execution = pd.Timestamp.now()
-
         # Update fixed portfolio columns
-        self._opt_positions.loc[idx, "positions_id"] = positions_id
-        self._opt_positions.loc[idx, "timestamp"] = timestamp_execution
+        data_new_row = {
+            "positions_id": uuid.uuid4().hex,
+            "timestamp": timestamp,
+        }
 
         # Update volume for each symbol, add new if not yet present
         for position in new_positions:
-            self._opt_positions.loc[idx, position["symbol"]] = position["volume"]
+            data_new_row[position["symbol"]] = position["volume"]
+
+        df_new = pd.DataFrame(data_new_row, index=[self._opt_positions.shape[0]])
+
+        # Concat dataframes
+        self._opt_positions = pd.concat([self._opt_positions, df_new], axis=0)
 
         # Fill NaNs with zeros (newly added symbols will have mostly NaNs)
         self._opt_positions = self._opt_positions.fillna(0)
 
         # Update current positions
-        self._current_positions = new_positions
-
-        return timestamp_to_string(timestamp_execution)
-
-    def _update_asset_values(self, prices: dict) -> None:
-
-        """Internal method to update the value of current assets based on new prices"""
-
-        for symbol, details in self._assets.items():
-
-            # Determine new value based on prices and volume
-            value_current = self._assets[symbol]["volume"] * prices[symbol]
-            self._assets[symbol]["value_current"] = value_current
-
-            # Calculate the profit as a percentage of the starting value
-            value_increase = value_current - self._assets[symbol]["value_at_buy"]
-            self._assets[symbol]["profit_percentage"] = (
-                value_increase / details["value_at_buy"] * 100
-            )
+        self._current_optimal_positions = new_positions
 
     def _calculate_delta(self) -> dict:
 
@@ -134,8 +138,22 @@ class Portfolio:
         Returns:
             dict: dict with difference in volume per asset with the previous position
         """
-        # TODO: check if this works correctly for assets that are added for the first time
-        # Determine delta with previous positions
+
+        # #### Delta with assets
+        #
+        # delta = dict()
+        # current_pos = (
+        #     self._opt_positions.drop(columns=self._opt_positions_fixed_columns)
+        #     .iloc[-1]
+        #     .to_dict()
+        # )
+        # for symbol in current_pos:
+        #     if symbol not in self._assets:
+        #         delta[symbol] = current_pos[symbol]
+        #     else:
+        #         delta[symbol] = current_pos[symbol] - self._assets[symbol]["volume"]
+        # return delta
+
         if self._opt_positions.shape[0] <= 1:
             # Initial position is always buy
             delta = self._opt_positions.drop(columns=self._opt_positions_fixed_columns)
@@ -147,11 +165,10 @@ class Portfolio:
                 .tail(1)
             )
 
-        return delta.squeeze(axis=0).to_dict()
+        delta = delta.squeeze(axis=0).to_dict()
+        return delta
 
-    def _construct_orders(
-        self, delta: dict, prices: dict, timestamp_execution: str
-    ) -> list:
+    def _construct_orders(self, delta: dict, timestamp: pd.Timestamp) -> list:
 
         """Internal method the contruct the orders from the deltas in position. The produces
         a list of buy / sell orders to be passed to the broker that actually submit the orders
@@ -163,24 +180,49 @@ class Portfolio:
         """
 
         orders = []
-        for symbol in delta:
+        for symbol, volume_diff in delta.items():
 
-            if delta[symbol] != 0:
+            if volume_diff != 0:
 
                 order_id = uuid.uuid4().hex
-                order_type = "buy" if delta[symbol] > 0 else "sell"
-                order_volume = abs(delta[symbol])
-                order_value = prices[symbol] * order_volume
+                order_type = "buy" if volume_diff > 0 else "sell"
+                order_volume = abs(volume_diff)
+                order_value = self._prices[symbol] * order_volume
 
-                # Concel order of  if order would surpass
+                # Do not add order if not sufficient unallocated capital is available
                 if order_type == "buy" and order_value > self._unallocated_capital:
 
-                    Warning(
+                    warnings.warn(
                         "[Portfolio._construct_orders()]"
-                        f" - Order with id {order_id} not added to list - Symbol: {symbol}"
-                        f" - Price: {prices[symbol]} - Volume: {order_volume}"
-                        f" - Total order value: {order_value}"
-                        f" - Unallocated capital: {self._unallocated_capital}"
+                        f"\n\t{colors.WARNING}Order not added (insufficient funds){colors.ENDC}"
+                        f"\n\tOrder id: {order_id}"
+                        f"\n\tSymbol: {symbol}"
+                        f"\n\tPrice: {self._prices[symbol]}"
+                        f"\n\tVolume: {order_volume}"
+                        f"\n\tTotal order value: {order_value}"
+                        f"\n\tUnallocated capital: {self._unallocated_capital}"
+                    )
+
+                    continue
+
+                # Check for similar order already pending
+                pending_orders = self._orders[self._orders["status"] == "pending"]
+                matching_pending_orders = pending_orders[
+                    (pending_orders["symbol"] == symbol)
+                    & (pending_orders["symbol"] == order_type)
+                ]
+
+                if matching_pending_orders.shape[0] > 0:
+
+                    warnings.warn(
+                        "[Portfolio._construct_orders()]"
+                        f"\n\t{colors.WARNING}Order not added ({matching_pending_orders.shape[0]} already pending){colors.ENDC}"
+                        f"\n\tOrder id: {order_id}"
+                        f"\n\tSymbol: {symbol}"
+                        f"\n\tPrice: {self._prices[symbol]}"
+                        f"\n\tVolume: {order_volume}"
+                        f"\n\tTotal order value: {order_value}"
+                        f"\n\tUnallocated capital: {self._unallocated_capital}"
                     )
 
                     continue
@@ -195,20 +237,33 @@ class Portfolio:
                     }
                 )
 
-                idx = self._orders.shape[0]
-
-                self._orders.loc[idx, "order_id"] = order_id
-                self._orders.loc[idx, "symbol"] = symbol
-                self._orders.loc[idx, "timestamp_execution"] = string_to_timestamp(
-                    timestamp_execution
+                # Construct new row as df
+                df_new_row = pd.DataFrame(
+                    {
+                        "order_id": order_id,
+                        "status": "pending",
+                        "symbol": symbol,
+                        "timestamp": timestamp,
+                        "timestamp_execution": pd.Timestamp.now(),
+                        "price_execution": self._prices[symbol],
+                        "order_type": order_type,
+                        "volume": order_volume,
+                    },
+                    index=[self._orders.shape[0]],
                 )
-                self._orders.loc[idx, "price_execution"] = prices[symbol]
-                self._orders.loc[idx, "order_type"] = order_type
-                self._orders.loc[idx, "volume"] = order_volume
+
+                # Concat dataframes
+                self._orders = pd.concat([self._orders, df_new_row], axis=0)
 
         return orders
 
-    def add_settlement(self, order_id: str, price: float, timestamp: str) -> None:
+    def add_settlement(
+        self,
+        order_id: str,
+        price: float,
+        fee: float,
+        timestamp_settlement: pd.Timestamp,
+    ) -> None:
 
         """Adds a settlement to an order and updates asset volumes and value at buy when the
         order has been filled. Uses the order_id to id the corresponding order in the orders df
@@ -216,18 +271,19 @@ class Portfolio:
         """
 
         # Add to orders dataframe
-        idx = self._orders.index[self._orders["order_id"] == order_id]
-        self._orders.loc[idx, "timestamp_settlement"] = timestamp
-        self._orders.loc[idx, "price_settlement"] = price
-        self._orders.loc[idx, "slippage"] = (
-            price - self._orders.loc[idx, "price_execution"]
+        order_idx = self._orders.index[self._orders["order_id"] == order_id]
+        self._orders.loc[order_idx, "timestamp_settlement"] = timestamp_settlement
+        self._orders.loc[order_idx, "price_settlement"] = price
+        self._orders.loc[order_idx, "slippage"] = (
+            price - self._orders.loc[order_idx, "price_execution"]
         )
+        self._orders.loc[order_idx, "fee"] = fee
 
         # Extract requirements for updating assets
-        volume_diff = self._orders.loc[idx, "volume"].values[0]
+        volume_diff = self._orders.loc[order_idx, "volume"].values[0]
         value_diff = volume_diff * price
-        symbol = self._orders.loc[idx, "symbol"].values[0]
-        order_type = self._orders.loc[idx, "order_type"].values[0]
+        symbol = self._orders.loc[order_idx, "symbol"].values[0]
+        order_type = self._orders.loc[order_idx, "order_type"].values[0]
 
         # Update assets
         if order_type == "buy":
@@ -236,9 +292,9 @@ class Portfolio:
             if symbol not in self._assets:
                 self._assets[symbol] = {
                     "volume": 0,
-                    "value_at_buy": 0,
                     "value_current": 0,
-                    "profit_percentage": 0,
+                    "total_value_at_buy": 0,
+                    "total_value_at_sell": 0,
                 }
 
             # Subtract from unallocated capital
@@ -247,7 +303,9 @@ class Portfolio:
             # Add to symbol asset
             self._assets[symbol]["volume"] += volume_diff
             self._assets[symbol]["value_current"] += value_diff
-            self._assets[symbol]["value_at_buy"] += value_diff
+
+            # Add to total bought value for this asset
+            self._assets[symbol]["total_value_at_buy"] += value_diff
 
         elif order_type == "sell":
 
@@ -255,22 +313,19 @@ class Portfolio:
             self._unallocated_capital += value_diff
 
             # Subtract from symbol asset
-            volume_old = self._assets[symbol]["volume"]
             self._assets[symbol]["volume"] -= volume_diff
             self._assets[symbol]["value_current"] -= value_diff
 
-            if self._assets[symbol]["volume"] == 0:
-                # Reset value at buy
-                self._assets[symbol]["value_at_buy"] = 0
-            else:
-                # TODO: nicer way of keeping value at buy?
-                factor = self._assets[symbol]["volume"] / volume_old
-                self._assets[symbol]["value_at_buy"] *= factor
+            # Add to total sold value for this asset
+            self._assets[symbol]["total_value_at_sell"] += value_diff
 
         else:
 
             # Order type should be either buy or sell
             raise Exception("order type not buy or sell")
+
+        # Change order status to filled
+        self._orders.loc[order_idx, "status"] = "filled"
 
     def get_optimal_positions(self) -> pd.DataFrame:
         return self._opt_positions
@@ -289,16 +344,29 @@ class Portfolio:
         # n_orders = self.orders.groupby("symbol").size().to_dict()
         total_value = self._unallocated_capital
 
-        for _, asset_details in self._assets.items():
+        pnl_assets = {}
+        for symbol, asset_details in self._assets.items():
             total_value += asset_details["value_current"]
+
+            asset_current_profit = (
+                asset_details["value_current"]
+                + self._assets[symbol]["total_value_at_sell"]
+                - self._assets[symbol]["total_value_at_buy"]
+            )
+
+            pnl_assets[symbol] = asset_current_profit
+
+        # Calculate profit percentage total
+        profit_percentage_total = (
+            (total_value - self._start_capital) / self._start_capital * 100
+        )
 
         pnl = {
             "start_capital": self._start_capital,
             "unallocated": self._unallocated_capital,
             "total_value": total_value,
-            "profit_percentage": (total_value - self._start_capital)
-            / self._start_capital
-            * 100,
+            "profit_percentage": profit_percentage_total,
+            "assets": pnl_assets,
         }
 
         return pnl
@@ -311,11 +379,17 @@ class Portfolio:
             return f"{colors.FAIL}{x:.{decimals}f}{colors.ENDC}"
 
     def _print_item(
-        self, currency: float, value: float, profit_percentage: float
+        self, currency: float, value: float, profit_percentage: float = None
     ) -> str:
+
         value_colored = self._color_number_sign(value, decimals=2)
-        profit_percentage_colored = self._color_number_sign(profit_percentage)
-        return f"{currency} {value_colored} / {profit_percentage_colored} %"
+        out = f"{currency} {value_colored}"
+
+        if profit_percentage is not None:
+            profit_percentage_colored = self._color_number_sign(profit_percentage)
+            out += f" / {profit_percentage_colored} %"
+
+        return out
 
     def __str__(self) -> str:
 
@@ -325,24 +399,22 @@ class Portfolio:
         out = f"{colors.BOLD}Portfolio net: "
         out += self._print_item("USD", pnl["total_value"], pnl["profit_percentage"])
 
-        for symbol, details in self._assets.items():
+        for symbol, current_profit in pnl["assets"].items():
             out += f" --- {symbol}: "
-            out += self._print_item(
-                "USD", details["value_current"], details["profit_percentage"]
-            )
+            out += self._print_item("USD", current_profit)
 
         return out
 
 
 if __name__ == "__main__":
 
-    pf = Portfolio(1000)
+    pf = Portfolio(100000)
 
-    for i in range(5):
+    for i in range(50):
 
         optimal_positions = [
-            {"symbol": "BTCUSD", "volume": np.random.uniform(high=10)},
-            {"symbol": "ETHUSD", "volume": np.random.uniform(high=10)},
+            {"symbol": "BTCUSD", "volume": 0},
+            {"symbol": "ETHUSD", "volume": 0},
         ]
 
         if np.random.choice([False, True]):
@@ -351,65 +423,36 @@ if __name__ == "__main__":
                 {"symbol": "ETHUSD", "volume": np.random.uniform(high=10)},
             ]
 
-        prices = {
-            "BTCUSD": np.random.uniform(high=10),
-            "ETHUSD": np.random.uniform(high=10),
-        }
+        tick = [
+            {
+                "symbol": "BTCUSD",
+                "open": 3902.52,
+                "high": 3908.0,
+                "low": 3902.25,
+                "close": np.random.uniform(3500, 4000),
+                "volume": 0.25119066,
+                "timestamp": pd.Timestamp.now(),
+            },
+            {
+                "symbol": "ETHUSD",
+                "open": 3902.52,
+                "high": 3908.0,
+                "low": 3902.25,
+                "close": np.random.uniform(3500, 4000),
+                "volume": 0.25119066,
+                "timestamp": pd.Timestamp.now(),
+            },
+        ]
 
-        orders = pf.update(prices, optimal_positions)
+        orders = pf.update(tick, optimal_positions)
+
+        prices = extract_prices(tick, "close")
 
         for order in orders:
             id = order["order_id"]
-            price = np.random.uniform(high=2000)
+            price = prices[order["symbol"]]
+            fee = price / 100
             ts = pd.Timestamp.now()
-            pf.add_settlement(id, price, ts)
+            pf.add_settlement(id, price, fee, ts)
 
         print(pf)
-
-    # print("\norders: \n", pf.orders.drop(columns=["order_id"]))
-    # print("\norder: \n", orders)
-    # print("\npositions: \n", pf.get_history())
-    # print("\nassets: \n", pf.assets)
-
-    # pf.profit_and_loss()
-
-    # start_positions = [
-    #     {
-    #         "symbol": "BTCUSD",
-    #         "timestamp_execution": pd.Timestamp("2017-01-01 12:00:00"),
-    #         "volume": 10,
-    #         "price_execution": 100,
-    #         "timestamp_settlement": pd.Timestamp("2017-01-01 12:00:02"),
-    #         "price_settlement": 101,
-    #     },
-    #     {
-    #         "symbol": "ETHUSD",
-    #         "timestamp_execution": pd.Timestamp("2017-01-03 12:00:00"),
-    #         "volume": 10,
-    #         "price_execution": 120,
-    #         "timestamp_settlement": pd.Timestamp("2017-01-03 12:00:02"),
-    #         "price_settlement": 121,
-    #     },
-    #     {
-    #         "symbol": "ETHUSD",
-    #         "timestamp_execution": pd.Timestamp("2017-01-10 12:00:00"),
-    #         "volume": -10,
-    #         "price_execution": 120,
-    #         "timestamp_settlement": pd.Timestamp("2017-01-10 12:00:02"),
-    #         "price_settlement": 101,
-    #     },
-    #     {
-    #         "symbol": "BTCUSD",
-    #         "timestamp_execution": pd.Timestamp("2017-01-21 12:00:00"),
-    #         "volume": -5,
-    #         "price_execution": 90,
-    #         "timestamp_settlement": pd.Timestamp("2017-01-21 12:00:02"),
-    #         "price_settlement": 87,
-    #     },
-    # ]
-
-    # df_start = pd.DataFrame(start_positions)
-    # pf = Portfolio(df_start)
-    # df_pos = pf.get_positions()
-    # print(df_pos)
-    # print(pf)
