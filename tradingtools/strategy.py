@@ -1,10 +1,10 @@
-
-import pandas as pd
 import numpy as np
 from collections import deque
 
+
 class Strategy:
     def __init__(self) -> None:
+        super().__init__()
         self.i = 0
 
     def execute_on_tick(self, tick: list, context: dict = None) -> list:
@@ -23,15 +23,27 @@ class Strategy:
 
 
 class MovingAverageCrossOverSingle(Strategy):
-    def __init__(self, symbol: str, n_short: int = 300, n_long: int = 900) -> None:
+    def __init__(
+        self, symbol: str, n_smooth: int = 10, n_short: int = 100, n_long: int = 300
+    ) -> None:
         super().__init__()
         self.symbol = symbol
+        self.n_smooth = n_smooth
         self.n_short = n_short
         self.n_long = n_long
 
         # Initialize arrays
-        self.short_que = deque(self.n_short* [0.0], maxlen=self.n_short)
-        self.long_que = deque(self.n_long* [0.0], maxlen=self.n_long)
+        self.short_que = deque(self.n_short * [0.0], maxlen=self.n_short)
+        self.long_que = deque(self.n_long * [0.0], maxlen=self.n_long)
+
+        # Initialize multiplying factors for smoothing
+        if n_smooth is None or n_smooth == 0:
+            self._smooth_factor_history = 1
+            self._smooth_factor_current = 1
+        else:
+            self._smooth_factor_history = (self.n_smooth - 1) / self.n_smooth
+            self._smooth_factor_current = 1 / self.n_smooth
+            assert self._smooth_factor_current + self._smooth_factor_history == 1.0
 
         self.x = 0
 
@@ -43,12 +55,12 @@ class MovingAverageCrossOverSingle(Strategy):
         # Skip first 300 days to get full windows
         self.i += 1
 
-        return self._execute(tick['close'])
+        return self._execute(tick["close"])
 
     def _execute(self, x):
 
-        # Moving average
-        self.x = self.x * (99/100) + x * (1/100)
+        # Smoothing
+        self.x = self.x * self._smooth_factor_history + x * self._smooth_factor_current
 
         # Update lists with latest Closing price
         self.long_que.append(self.x)
@@ -61,7 +73,7 @@ class MovingAverageCrossOverSingle(Strategy):
         # Trading logic
         if self.i > self.n_long:
             if short_mavg > long_mavg:
-                return [{"symbol": self.symbol, "volume": 0.1}]        
+                return [{"symbol": self.symbol, "volume": 0.1}]
 
         return [{"symbol": self.symbol, "volume": 0}]
 
@@ -94,5 +106,5 @@ if __name__ == "__main__":
     for i in range(301):
         optimal_positions = strat.execute_on_tick(tick)
 
-        if optimal_positions[0]['volume'] > 0:
+        if optimal_positions[0]["volume"] > 0:
             print(f"{i} - {optimal_positions}")

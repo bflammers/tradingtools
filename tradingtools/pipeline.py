@@ -21,6 +21,7 @@ class Pipeline:
         portfolio: Portfolio,
         broker: Broker,
         risk_management=None,
+        verbose=True, 
     ) -> None:
         super().__init__()
 
@@ -29,6 +30,8 @@ class Pipeline:
         self.risk_management = risk_management
         self.portfolio = portfolio
         self.broker = broker
+
+        self.verbose = verbose
 
         self._validate_inputs()
 
@@ -74,9 +77,10 @@ class Pipeline:
             # Increment counter
             self.i += 1
 
-            if self.i % 1000 == 0:
-                print(self.portfolio)
-                print(self.dataloader)
+            if self.verbose:
+                if self.i % 1000 == 0:
+                    print(self.portfolio)
+                    print(self.dataloader)
 
 
 if __name__ == "__main__":
