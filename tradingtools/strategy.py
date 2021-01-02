@@ -37,8 +37,8 @@ class MovingAverageCrossOverSingle(Strategy):
         self.long_que = deque(self.n_long * [0.0], maxlen=self.n_long)
 
         # Initialize multiplying factors for smoothing
-        if n_smooth is None or n_smooth == 0:
-            self._smooth_factor_history = 1
+        if n_smooth is None or n_smooth == 0 or n_smooth == 1:
+            self._smooth_factor_history = 0
             self._smooth_factor_current = 1
         else:
             self._smooth_factor_history = (self.n_smooth - 1) / self.n_smooth
@@ -73,14 +73,14 @@ class MovingAverageCrossOverSingle(Strategy):
         # Trading logic
         if self.i > self.n_long:
             if short_mavg > long_mavg:
-                return [{"symbol": self.symbol, "volume": 0.1}]
+                return [{"symbol": self.symbol, "volume": 0.001}]
 
         return [{"symbol": self.symbol, "volume": 0}]
 
 
 if __name__ == "__main__":
 
-    strat = MovingAverageCrossOverSingle("BTCUSD")
+    strat = MovingAverageCrossOverSingle("BTCUSD", n_smooth=0)
 
     tick = [
         {
