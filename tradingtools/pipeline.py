@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 
+import json
+
 try:
     from .data import HistoricalOHLCLoader
     from .strategy import Strategy
@@ -62,7 +64,7 @@ class Pipeline:
 
             for order in orders:
 
-                # ASYNC! -> callback to add_settlement
+                # TODO: make ASYNC w/ callback to add_settlement
 
                 # Pass to broker -> settlement back to portfolio
                 settlement = self.broker.place_order(order, tick)
@@ -71,6 +73,7 @@ class Pipeline:
                     order_id=settlement["order_id"],
                     price=settlement["price"],
                     fee=settlement["fee"],
+                    fee_currency=settlement["fee_currency"],
                     timestamp_settlement=settlement["timestamp"],
                 )
 
@@ -78,7 +81,7 @@ class Pipeline:
             self.i += 1
 
             if self.verbose:
-                if self.i % 1000 == 0:
+                if self.i % 1 == 0:
                     print(self.portfolio)
                     print(self.dataloader)
 
@@ -102,12 +105,22 @@ if __name__ == "__main__":
 
     try: 
 
-        p = "./data/cryptodatadownload/gemini/price"
-        dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern="2020")
+        p = "./data/cryptodatadownload/binance/price"
+        dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern=None)
+        dl.df['symbol'] = 'BTC/EUR'
 
-        strat = MovingAverageCrossOverSingle(symbol="BTCUSD")
+        strat = MovingAverageCrossOverSingle(symbol="BTC/EUR")
         pf = Portfolio(5000)
-        brkr = Broker()
+
+        with open("./secrets.json", "r") as in_file:
+            secrets = json.load(in_file)["binance"]
+
+        brkr = Broker(
+            backtest=True,
+            exchange_name="binance",
+            api_key=secrets["api_key"],
+            secret_key=secrets["secret_key"],
+        )
 
         pipeline = Pipeline(dataloader=dl, strategy=strat, portfolio=pf, broker=brkr)
 
