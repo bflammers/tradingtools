@@ -41,9 +41,9 @@ def test_update():
         np.array([["BTCUSD", "pending", 10.0, "buy", 1.0]], dtype=np.object),
     )
 
-    pf.add_settlement(
+    pf.settle_order(
         order_id=orders[0]["order_id"],
-        price=11.0,
+        price_settlement=11.0,
         fee=11 / 100,
         timestamp_settlement="2019-01-02 23:25:00",
     )
@@ -150,9 +150,9 @@ def test_full_update_cycle():
 
     for i, order in enumerate(orders):
         settlement_price = tick[i]["close"]
-        pf.add_settlement(
+        pf.settle_order(
             order_id=order["order_id"],
-            price=settlement_price,
+            price_settlement=settlement_price,
             fee=settlement_price / 100,
             timestamp_settlement=pd.Timestamp.now(),
         )

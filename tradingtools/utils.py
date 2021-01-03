@@ -1,3 +1,4 @@
+from decimal import Decimal
 import pandas as pd
 import warnings
 
@@ -21,6 +22,42 @@ class colors:
     UNDERLINE = "\033[4m"
 
 
+def color_number_sign(x: Decimal, decimals: int = 3, offset: float = 0) -> str:
+    if (x - offset) > 0:
+        return f"{colors.OKGREEN}+{x:.{decimals}f}{colors.ENDC}"
+    else:
+        return f"{colors.FAIL}{x:.{decimals}f}{colors.ENDC}"
+
+
+def print_item(
+    currency: str,
+    value: Decimal,
+    profit: Decimal = None,
+    profit_percentage: Decimal = None,
+    n_orders: int = None,
+    n_open_orders: int = None,
+) -> str:
+
+    value_colored = color_number_sign(value, decimals=2)
+    out = f"{currency} {value_colored}"
+
+    if profit is not None:
+        profit_colored = color_number_sign(profit)
+        out += f" / {profit_colored} profit"
+
+    if profit_percentage is not None:
+        profit_percentage_colored = color_number_sign(profit_percentage)
+        out += f" / {profit_percentage_colored} % profit"
+
+    if n_orders is not None:
+        out += f" / {n_orders} orders"
+
+    if n_open_orders is not None:
+        out += f" / {n_open_orders} open orders"
+
+    return out
+
+
 _strftime_format = "%Y-%m-%d %H:%M:%S.%f"
 
 
@@ -33,4 +70,4 @@ def string_to_timestamp(ts_string: str) -> pd.Timestamp:
 
 
 def extract_prices(tick: list, price_type: str = "close") -> dict:
-    return {t["symbol"]: t[price_type] for t in tick if price_type in t}
+    return {t["symbol"]: Decimal(t[price_type]) for t in tick if price_type in t}

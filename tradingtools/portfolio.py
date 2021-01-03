@@ -1,6 +1,13 @@
 import pandas as pd
 import numpy as np
 import uuid
+import csv
+import warnings
+
+from decimal import Decimal
+from pathlib import Path
+
+from pandas.core.frame import DataFrame
 
 
 try:
@@ -8,46 +15,243 @@ try:
         colors,
         extract_prices,
         warnings,
+        timestamp_to_string,
+        print_item,
     )
 except:
     from utils import (
         colors,
         extract_prices,
         warnings,
+        timestamp_to_string,
+        print_item,
     )
 
 
-class Portfolio:
-    def __init__(self, start_capital) -> None:
+class Symbol:
+    def __init__(self, symbol_name: str) -> None:
         super().__init__()
+        self.symbol_name = symbol_name
+        self.optimal_amount = Decimal(0)
+        self._current_amount = Decimal(0)
+        self._pending_delta = Decimal(0)
+        self._open_orders = {}
+        self._latest_price = Decimal(0)
+        self._latest_tick_timestamp = None
+        self._n_orders = 0
+        self._total_value_at_buy = Decimal(0)
+        self._total_value_at_sell = Decimal(0)
 
-        self._current_optimal_positions = []
-        self._opt_positions_fixed_columns = ["positions_id", "timestamp"]
-        self._opt_positions = pd.DataFrame(columns=self._opt_positions_fixed_columns)
+    def sync_state(
+        self, tick_timestamp: str, price: Decimal = None, current_amount: Decimal = None
+    ) -> None:
 
-        self._orders = pd.DataFrame(
-            columns=[
-                "order_id",
-                "symbol",
-                "status",
-                "order_type",
-                "volume",
-                "timestamp",
-                "timestamp_execution",
-                "timestamp_settlement",
-                "price_execution",
-                "price_settlement",
-                "fee",
-                "slippage",
-            ]
+        if tick_timestamp is not None:
+            self._latest_tick_timestamp = tick_timestamp
+
+        if price is not None:
+
+            if tick_timestamp is None:
+                warnings.warn(
+                    "[Portfolio.Symbol] tick_timestamp should be provided with latest price"
+                )
+
+            self._latest_price = Decimal(price)
+
+        if current_amount is not None:
+
+            if tick_timestamp is not None:
+                warnings.warn(
+                    "[Portfolio.Symbol] tick_timestamp should only be provided with latest price, not with current_amount"
+                )
+
+            self._current_amount = Decimal(current_amount)
+
+    def update_optimal_position(self, amount: Decimal) -> dict:
+
+        if amount != self.optimal_amount:
+
+            # Construct order
+            delta = Decimal(amount) - (self._current_amount + self._pending_delta)
+            side = "buy" if delta > 0 else "sell"
+            amount = abs(delta)
+            order = self._create_order(amount, side)
+
+            # Update state
+            self.optimal_amount = amount
+            self._open_orders[order["order_id"]] = order
+            self._n_orders += 1
+            self._pending_delta += delta
+
+            return order
+
+        return None
+
+    def add_settlement(self, order_id: str, price_settlement: Decimal):
+
+        # Retrieve open order and delete from open orders
+        order = self._open_orders.pop(order_id)
+
+        # Calculate value difference due to order
+        value_diff = order["amount"] * Decimal(price_settlement)
+
+        # Update symbol state
+        if order["side"] == "buy":
+            self._current_amount += order["amount"]
+            self._pending_delta -= order["amount"]
+            self._total_value_at_buy += value_diff
+        elif order["side"] == "sell":
+            self._current_amount -= order["amount"]
+            self._pending_delta += order["amount"]
+            self._total_value_at_sell += value_diff
+        else:
+            raise Exception(
+                f"[Portfolio.Symbol] side {order['side']} not knownm should be buy or sell"
+            )
+
+        return order
+
+    def _create_order(self, amount: Decimal, side: str) -> dict:
+
+        order = {
+            "order_id": uuid.uuid4().hex,
+            "symbol": self.symbol_name,
+            "side": side,
+            "amount": amount,
+            "timestamp_tick": self._latest_tick_timestamp,
+            "price_execution": self._latest_price,
+            "cost_execution": amount * self._latest_price,
+            "timestamp_execution": timestamp_to_string(pd.Timestamp.now()),
+        }
+
+        return order
+
+    def profit_and_loss(self) -> dict:
+
+        # Calculate current value and profit so far
+        current_value = self._current_amount * self._current_amount
+        current_profit = (
+            current_value + self._total_value_at_sell - self._total_value_at_buy
         )
 
-        self._assets = dict()
-        self._prices = dict()
+        # Collect in dict
+        pnl = {
+            "amount": self._current_amount,
+            "value": current_value,
+            "profit": current_profit,
+            "n_orders": self._n_orders,
+            "n_open_orders": len(self._open_orders),
+            "timestamp_valuation": self._latest_tick_timestamp,
+        }
+
+        return pnl
+
+    def __str__(self, currency: str = "EUR") -> str:
+        pnl = self.profit_and_loss()
+        return print_item(
+            currency=currency,
+            value=pnl["value"],
+            profit=pnl["profit"]
+        )
+
+
+class Portfolio:
+    def __init__(
+        self,
+        start_capital: Decimal,
+        results_parent_dir: str = "./runs",
+        base_currency: str = "EUR",
+    ) -> None:
+        super().__init__()
+
+        self.symbols = {}
+
+        # Create directory for results
+        now = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+        self._results_dir = (Path(results_parent_dir) / now).absolute()
+        self._results_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[Portfolio] results directory created: {self._results_dir}")
+
+        # Create csv file and path for optimal_positions
+        self._opt_positions_path = self._results_dir / f"{now}_optimal_positions.csv"
+        self._opt_positions_columns = ["positions_id", "timestamp", "symbol", "amount"]
+
+        with open(self._opt_positions_path, "w") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(self._opt_positions_columns)
+
+        # Create csv file and path for orders
+        self._orders_path = self._results_dir / f"{now}_orders.csv"
+        self._orders_columns = [
+            "order_id",
+            "symbol",
+            "side",
+            "amount",
+            "tick_timestamp",
+            "price_execution",
+            "cost_execution",
+            "timestamp_execution",
+        ]
+
+        with open(self._orders_path, "w") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(self._orders_columns)
+
+        # Create csv file and path for orders
+        self._settlements_path = self._results_dir / f"{now}_settlements.csv"
+        self._settlements_columns = [
+            "order_id",
+            "symbol",
+            "side",
+            "amount",
+            "tick_timestamp",
+            "price_execution",
+            "cost_execution",
+            "timestamp_execution",
+            "price_settlement",
+            "timestamp_settlement",
+            "fee",
+            "fee_currency",
+            "slippage",
+            "total_cost",
+        ]
+
+        with open(self._settlements_path, "w") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(self._settlements_columns)
+
+        # Initialize state objects
+        self._current_optimal_positions = {}
         self._start_capital = start_capital
         self._unallocated_capital = start_capital
+        self._reserved_capital = Decimal(0)
+        self._base_currency = base_currency
 
-    def update(self, tick: list, optimal_positions: list = []) -> list:
+    def _append_to_csv(self, target_csv: str, new_values: dict) -> None:
+
+        if target_csv == "opt_positions":
+            column_names = self._opt_positions_columns
+        elif target_csv == "orders":
+            column_names = self._orders_columns
+        elif target_csv == "settlements":
+            column_names = self._settlements_columns
+        else:
+            raise NotImplementedError("[Portfolio] no append method for {target_csv}")
+
+        row = []
+
+        for column in column_names:
+
+            try:
+                row.append(new_values[column])
+            except KeyError:
+                row.append(None)
+
+        with open(self._opt_positions_path, "a") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(row)
+
+    def update(self, tick: list, optimal_positions: dict = {}) -> list:
 
         """Update the portfolio using the new optimal positions (from strategy)
         and most recent prices. The optimal positions only trigger an order request
@@ -65,204 +269,94 @@ class Portfolio:
         #     {"symbol": "ETHUSD", "volume": 0},
         # ]
 
-        # Update latest prices of assets
-        self._update_asset_prices(tick)
+        # Construct orders list to append orders to
+        orders = []
 
-        # If optimal position is not equal to the current position we will update
-        if optimal_positions != self._current_optimal_positions:
+        # Update positions
+        for symbol_name, amount in optimal_positions.items():
 
-            timestamp = pd.Timestamp(tick[0]["timestamp"])
+            # Add symbol if needed
+            if symbol_name not in self.symbols:
+                self.symbols[symbol_name] = Symbol(symbol_name)
+                self._current_optimal_positions[symbol_name] = 0
 
-            # Update positions
-            self._update_optimal_positions(optimal_positions, timestamp)
+            # Load symbol
+            symbol = self.symbols[symbol_name]
 
-            # Set dict of deltas per symbol
-            delta = self._calculate_delta()
+            # Update price and tick timestamp
+            price, timestamp = self._extract_price_from_tick(tick, symbol_name)
+            self._update_symbol_price(symbol, price, timestamp)
 
-            # Prepare order lists
-            orders = self._construct_orders(delta, timestamp)
+            if amount != symbol.optimal_amount:
 
-            return orders
+                # Update symbol position, generate order if needed
+                order = symbol.update_optimal_position(amount)
 
-        # Return empty orders list
-        return []
+                if order is not None:
 
-    def _update_asset_prices(self, tick: list) -> None:
+                    # Append orders if not None
+                    orders.append(order)
 
-        # Extract closing prices
-        self._prices = extract_prices(tick, "close")
+                    # Reserve capital
+                    self._reserved_capital += order["cost_execution"]
 
-        # Update asset prices
-        for symbol, details in self._assets.items():
+        # Write optimal postions and orders to file
+        self._write_optimal_positions(optimal_positions)
+        self._write_orders(orders)
 
-            # Determine new value based on prices and volume
-            value_current = details["volume"] * self._prices[symbol]
-            self._assets[symbol]["value_current"] = value_current
+        return orders
 
-    def _update_optimal_positions(
-        self, new_positions: dict, timestamp: pd.Timestamp
-    ) -> None:
+    @staticmethod
+    def _update_symbol_price(symbol: Symbol, price: Decimal, timestamp: str) -> None:
+        symbol.sync_state(tick_timestamp=timestamp, price=price)
+
+    @staticmethod
+    def _extract_price_from_tick(
+        tick: list, symbol_name: str, price_type: str = "close"
+    ) -> tuple:
+        for t in tick:
+            if t["symbol"] == symbol_name:
+                return t[price_type], t["timestamp"]
+
+    def _write_optimal_positions(self, new_positions: dict) -> None:
 
         """Internal method to update the intended positions. Note that this method
         only updates the "ideal" positions, and not the actual orders that will be
         created for the broker (these will be created through the _construct_orders method)
         """
 
-        # Update fixed portfolio columns
-        data_new_row = {
-            "positions_id": uuid.uuid4().hex,
-            "timestamp": timestamp,
-        }
+        # Fields common for all symbols within this position
+        positions_id = uuid.uuid4().hex
+        timestamp = timestamp_to_string(pd.Timestamp.now())
 
         # Update volume for each symbol, add new if not yet present
-        for position in new_positions:
-            data_new_row[position["symbol"]] = position["volume"]
+        for symbol_name, amount in new_positions.items():
 
-        df_new = pd.DataFrame(data_new_row, index=[self._opt_positions.shape[0]])
+            new_row = {
+                "positions_id": positions_id,
+                "timestamp": timestamp,
+                "symbol": symbol_name,
+                "amount": amount,
+            }
 
-        # Concat dataframes
-        self._opt_positions = pd.concat([self._opt_positions, df_new], axis=0)
+            # Append new row
+            self._append_to_csv("opt_positions", new_row)
 
-        # Fill NaNs with zeros (newly added symbols will have mostly NaNs)
-        self._opt_positions = self._opt_positions.fillna(0)
+    def _write_orders(self, orders: list) -> None:
 
-        # Update current positions
-        self._current_optimal_positions = new_positions
+        for order in orders:
+            # Append to csv file
+            self._append_to_csv("orders", order)
 
-    def _calculate_delta(self) -> dict:
-
-        """Internal method that calculates the delta with the previous positions
-        (positions are the "optimal" positions, not actual assets) based on the
-        portfolio dataframe
-
-        Returns:
-            dict: dict with difference in volume per asset with the previous position
-        """
-
-        # #### Delta with assets
-        #
-        # delta = dict()
-        # current_pos = (
-        #     self._opt_positions.drop(columns=self._opt_positions_fixed_columns)
-        #     .iloc[-1]
-        #     .to_dict()
-        # )
-        # for symbol in current_pos:
-        #     if symbol not in self._assets:
-        #         delta[symbol] = current_pos[symbol]
-        #     else:
-        #         delta[symbol] = current_pos[symbol] - self._assets[symbol]["volume"]
-        # return delta
-
-        if self._opt_positions.shape[0] <= 1:
-            # Initial position is always buy
-            delta = self._opt_positions.drop(columns=self._opt_positions_fixed_columns)
-        else:
-            delta = (
-                self._opt_positions.drop(columns=self._opt_positions_fixed_columns)
-                .tail(2)
-                .diff(1)
-                .tail(1)
-            )
-
-        delta = delta.squeeze(axis=0).to_dict()
-        return delta
-
-    def _construct_orders(self, delta: dict, timestamp: pd.Timestamp) -> list:
-
-        """Internal method the contruct the orders from the deltas in position. The produces
-        a list of buy / sell orders to be passed to the broker that actually submit the orders
-        to the exchange. It includes the execution prices and timestamp in the order for
-        future reference and slippage calculations.
-
-        Returns:
-            list: list of buy / sell orders to be passed to the broker
-        """
-
-        orders = []
-        for symbol, volume_diff in delta.items():
-
-            if volume_diff != 0:
-
-                order_id = uuid.uuid4().hex
-                order_type = "buy" if volume_diff > 0 else "sell"
-                order_volume = abs(volume_diff)
-                order_value = self._prices[symbol] * order_volume
-
-                # Do not add order if not sufficient unallocated capital is available
-                if order_type == "buy" and order_value > self._unallocated_capital:
-
-                    warnings.warn(
-                        "[Portfolio._construct_orders()]"
-                        f"\n\t{colors.WARNING}Order not added (insufficient funds){colors.ENDC}"
-                        f"\n\tOrder id: {order_id}"
-                        f"\n\tSymbol: {symbol}"
-                        f"\n\tPrice: {self._prices[symbol]}"
-                        f"\n\tVolume: {order_volume}"
-                        f"\n\tTotal order value: {order_value}"
-                        f"\n\tUnallocated capital: {self._unallocated_capital}"
-                    )
-
-                    continue
-
-                # Check for similar order already pending
-                pending_orders = self._orders[self._orders["status"] == "pending"]
-                matching_pending_orders = pending_orders[
-                    (pending_orders["symbol"] == symbol)
-                    & (pending_orders["symbol"] == order_type)
-                ]
-
-                if matching_pending_orders.shape[0] > 0:
-
-                    warnings.warn(
-                        "[Portfolio._construct_orders()]"
-                        f"\n\t{colors.WARNING}Order not added ({matching_pending_orders.shape[0]} already pending){colors.ENDC}"
-                        f"\n\tOrder id: {order_id}"
-                        f"\n\tSymbol: {symbol}"
-                        f"\n\tPrice: {self._prices[symbol]}"
-                        f"\n\tVolume: {order_volume}"
-                        f"\n\tTotal order value: {order_value}"
-                        f"\n\tUnallocated capital: {self._unallocated_capital}"
-                    )
-
-                    continue
-
-                # Append order to orders list
-                orders.append(
-                    {
-                        "order_id": order_id,
-                        "symbol": symbol,
-                        "order_type": order_type,
-                        "volume": order_volume,
-                    }
-                )
-
-                # Construct new row as df
-                df_new_row = pd.DataFrame(
-                    {
-                        "order_id": order_id,
-                        "status": "pending",
-                        "symbol": symbol,
-                        "timestamp": timestamp,
-                        "timestamp_execution": pd.Timestamp.now(),
-                        "price_execution": self._prices[symbol],
-                        "order_type": order_type,
-                        "volume": order_volume,
-                    },
-                    index=[self._orders.shape[0]],
-                )
-
-                # Concat dataframes
-                self._orders = pd.concat([self._orders, df_new_row], axis=0)
-
-        return orders
-
-    def add_settlement(
+    def settle_order(
         self,
+        symbol_name: str,
         order_id: str,
-        price: float,
-        fee: float,
+        price_settlement: Decimal,
         timestamp_settlement: pd.Timestamp,
+        fee: Decimal,
+        fee_currency: str,
+        total_cost: Decimal,
     ) -> None:
 
         """Adds a settlement to an order and updates asset volumes and value at buy when the
@@ -270,68 +364,38 @@ class Portfolio:
         and updates with price (settlement) and timestamp (settlement)
         """
 
-        # Add to orders dataframe
-        order_idx = self._orders.index[self._orders["order_id"] == order_id]
-        self._orders.loc[order_idx, "timestamp_settlement"] = timestamp_settlement
-        self._orders.loc[order_idx, "price_settlement"] = price
-        self._orders.loc[order_idx, "slippage"] = (
-            price - self._orders.loc[order_idx, "price_execution"]
-        )
-        self._orders.loc[order_idx, "fee"] = fee
+        # Get symbol
+        symbol = self.symbols[symbol_name]
 
-        # Extract requirements for updating assets
-        volume_diff = self._orders.loc[order_idx, "volume"].values[0]
-        value_diff = volume_diff * price
-        symbol = self._orders.loc[order_idx, "symbol"].values[0]
-        order_type = self._orders.loc[order_idx, "order_type"].values[0]
+        # Settle order
+        settled_order = symbol.add_settlement(order_id, price_settlement)
 
-        # Update assets
-        if order_type == "buy":
+        # Add settlement details to order
+        settled_order["price_settlement"] = price_settlement
+        settled_order["timestamp_settlement"] = timestamp_settlement
+        settled_order["fee"] = fee
+        settled_order["fee_currency"] = fee_currency
+        settled_order["slippage"] = price_settlement - settled_order["price_execution"]
+        settled_order["total_cost"] = total_cost
 
-            # Add new asset if needed
-            if symbol not in self._assets:
-                self._assets[symbol] = {
-                    "volume": 0,
-                    "value_current": 0,
-                    "total_value_at_buy": 0,
-                    "total_value_at_sell": 0,
-                }
+        # Subtract cost from reserved and unallocated capital
+        self._reserved_capital -= total_cost
+        self._unallocated_capital -= total_cost
 
-            # Subtract from unallocated capital
-            self._unallocated_capital -= value_diff
-
-            # Add to symbol asset
-            self._assets[symbol]["volume"] += volume_diff
-            self._assets[symbol]["value_current"] += value_diff
-
-            # Add to total bought value for this asset
-            self._assets[symbol]["total_value_at_buy"] += value_diff
-
-        elif order_type == "sell":
-
-            # Add to unallocated capital
-            self._unallocated_capital += value_diff
-
-            # Subtract from symbol asset
-            self._assets[symbol]["volume"] -= volume_diff
-            self._assets[symbol]["value_current"] -= value_diff
-
-            # Add to total sold value for this asset
-            self._assets[symbol]["total_value_at_sell"] += value_diff
-
-        else:
-
-            # Order type should be either buy or sell
-            raise Exception("order type not buy or sell")
-
-        # Change order status to filled
-        self._orders.loc[order_idx, "status"] = "filled"
+        # Write to csv
+        self._append_to_csv("settlements", order)
 
     def get_optimal_positions(self) -> pd.DataFrame:
-        return self._opt_positions
+        df = pd.read_csv(self._opt_positions_path)
+        return df
 
     def get_orders(self) -> pd.DataFrame:
-        return self._orders
+        df = pd.read_csv(self._orders_path)
+        return df
+
+    def get_settled_orders(self) -> pd.DataFrame:
+        df = pd.read_csv(self._settlements_path)
+        return df
 
     def profit_and_loss(self) -> dict:
 
@@ -341,55 +405,38 @@ class Portfolio:
             dict: overview of current pnl, overall and per asset
         """
 
-        # n_orders = self.orders.groupby("symbol").size().to_dict()
-        total_value = self._unallocated_capital
+        # Get pnl of all symbols
+        pnl_symbols = {}
+        current_value = self._unallocated_capital
+        n_orders = 0
+        n_open_orders = 0
 
-        pnl_assets = {}
-        for symbol, asset_details in self._assets.items():
-            total_value += asset_details["value_current"]
+        for symbol_name, symbol in self.symbols.items():
 
-            asset_current_profit = (
-                asset_details["value_current"]
-                + self._assets[symbol]["total_value_at_sell"]
-                - self._assets[symbol]["total_value_at_buy"]
-            )
+            pnl_symbol = symbol.profit_and_loss()
+            pnl_symbols[symbol_name] = pnl_symbol
 
-            pnl_assets[symbol] = asset_current_profit
+            current_value += pnl_symbol["value"]
+            n_orders += pnl_symbol["n_orders"]
+            n_open_orders += pnl_symbol["n_open_orders"]
 
         # Calculate profit percentage total
-        profit_percentage_total = (
-            (total_value - self._start_capital) / self._start_capital * 100
+        profit_percentage = (
+            (current_value - self._start_capital) / self._start_capital * 100
         )
 
         pnl = {
             "start_capital": self._start_capital,
             "unallocated": self._unallocated_capital,
-            "total_value": total_value,
-            "profit_percentage": profit_percentage_total,
-            "assets": pnl_assets,
+            "reserved": self._reserved_capital,
+            "total_value": current_value,
+            "profit_percentage": profit_percentage,
+            "n_orders": n_orders,
+            "n_open_orders": n_open_orders,
+            "symbols": pnl_symbols,
         }
 
         return pnl
-
-    @staticmethod
-    def _color_number_sign(x: float, decimals: int = 3, offset: float = 0) -> str:
-        if (x - offset) > 0:
-            return f"{colors.OKGREEN}+{x:.{decimals}f}{colors.ENDC}"
-        else:
-            return f"{colors.FAIL}{x:.{decimals}f}{colors.ENDC}"
-
-    def _print_item(
-        self, currency: float, value: float, profit_percentage: float = None
-    ) -> str:
-
-        value_colored = self._color_number_sign(value, decimals=2)
-        out = f"{currency} {value_colored}"
-
-        if profit_percentage is not None:
-            profit_percentage_colored = self._color_number_sign(profit_percentage)
-            out += f" / {profit_percentage_colored} %"
-
-        return out
 
     def __str__(self) -> str:
 
@@ -397,11 +444,15 @@ class Portfolio:
         pnl = self.profit_and_loss()
 
         out = f"{colors.BOLD}Portfolio net: "
-        out += self._print_item("USD", pnl["total_value"], pnl["profit_percentage"])
+        out += print_item(
+            currency=self._base_currency,
+            value=pnl["total_value"],
+            profit_percentage=pnl["profit_percentage"],
+        )
 
-        for symbol, current_profit in pnl["assets"].items():
-            out += f" --- {symbol}: "
-            out += self._print_item("USD", current_profit)
+        for symbol_name, symbol in self.symbols.items():
+            out += f" --- {symbol_name}: "
+            out += symbol.__str__(currency=self._base_currency)
 
         return out
 
@@ -412,16 +463,16 @@ if __name__ == "__main__":
 
     for i in range(50):
 
-        optimal_positions = [
-            {"symbol": "BTCUSD", "volume": 0},
-            {"symbol": "ETHUSD", "volume": 0},
-        ]
+        optimal_positions = {
+            "BTCUSD": 0,
+            "ETHUSD": 0,
+        }
 
         if np.random.choice([False, True]):
-            optimal_positions = [
-                {"symbol": "BTCUSD", "volume": np.random.uniform(high=10)},
-                {"symbol": "ETHUSD", "volume": np.random.uniform(high=10)},
-            ]
+            optimal_positions = {
+                "BTCUSD": np.random.uniform(high=10),
+                "ETHUSD": np.random.uniform(high=10),
+            }
 
         tick = [
             {
@@ -452,7 +503,8 @@ if __name__ == "__main__":
             id = order["order_id"]
             price = prices[order["symbol"]]
             fee = price / 100
-            ts = pd.Timestamp.now()
-            pf.add_settlement(id, price, fee, ts)
+            ts = timestamp_to_string(pd.Timestamp.now())
+            cost = price * order["amount"] + fee
+            pf.settle_order(order['symbol'], id, price, ts, fee, 'EUR', cost)
 
         print(pf)

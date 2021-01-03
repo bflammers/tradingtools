@@ -69,7 +69,7 @@ class Pipeline:
                 # Pass to broker -> settlement back to portfolio
                 settlement = self.broker.place_order(order, tick)
 
-                self.portfolio.add_settlement(
+                self.portfolio.settle_order(
                     order_id=settlement["order_id"],
                     price=settlement["price"],
                     fee=settlement["fee"],
