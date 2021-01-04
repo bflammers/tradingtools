@@ -3,6 +3,7 @@ import numpy as np
 import uuid
 import csv
 
+from uuid import uuid4
 from decimal import Decimal
 from pathlib import Path
 
@@ -173,8 +174,9 @@ class Portfolio:
         self.symbols = {}
 
         # Create directory for results
-        now = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        self._results_dir = (Path(results_parent_dir) / now).absolute()
+        now = pd.Timestamp.now().strftime('%Y%m%d_%H%M')
+        ts_uuid = f"{now}_{uuid4().hex}"
+        self._results_dir = (Path(results_parent_dir) / ts_uuid).absolute()
         self._results_dir.mkdir(parents=True, exist_ok=True)
 
         if self._verbose:
