@@ -15,11 +15,13 @@ class Broker:
         exchange_name: str = "binance",
         api_key: str = None,
         secret_key: str = None,
+        verbose: bool = True
     ) -> None:
         super().__init__()
         self.exchange = None
         self.backtest = backtest
         self.exchange_name = exchange_name
+        self._verbose = verbose
 
         if not self.backtest:
 
@@ -39,9 +41,10 @@ class Broker:
             }
         )
 
-        print(
-            f"[Broker] logged into Binance -- Status: {self.exchange.fetch_status()['status']}"
-        )
+        if self._verbose:
+            print(
+                f"[Broker] logged into Binance -- Status: {self.exchange.fetch_status()['status']}"
+            )
 
     def place_order(self, order: dict, tick: list = []) -> dict:
 
@@ -101,16 +104,22 @@ class Broker:
             price=None,
             params=params,
         )
-        print(f"[Broker] order response: {order_response}")
+
+        if self._verbose:
+            print(f"[Broker] order response: {order_response}")
+
         return order_response
 
-    @staticmethod
-    def _simulate_settlement(order: dict, tick: list = []) -> dict:
+    def _simulate_settlement(self, order: dict, tick: list = []) -> dict:
 
         prices_close = extract_prices(tick, "close")
         prices_high = extract_prices(tick, "high")
 
-        fee = prices_close[order["symbol"]] / 100
+        if self.exchange_name == "binance":
+            fee = prices_close[order["symbol"]] / 1000
+        else:
+            fee = prices_close[order["symbol"]] / 100
+
         price = prices_high[order["symbol"]]
 
         settlement = {

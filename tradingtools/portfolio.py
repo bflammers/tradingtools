@@ -164,16 +164,21 @@ class Portfolio:
         start_capital: Decimal,
         results_parent_dir: str = "./runs",
         base_currency: str = "EUR",
+        verbose: bool = True
     ) -> None:
         super().__init__()
 
+        self._verbose = verbose
+        self._base_currency = base_currency
         self.symbols = {}
 
         # Create directory for results
         now = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
         self._results_dir = (Path(results_parent_dir) / now).absolute()
         self._results_dir.mkdir(parents=True, exist_ok=True)
-        print(f"[Portfolio] results directory created: {self._results_dir}")
+
+        if self._verbose:
+            print(f"[Portfolio] results directory created: {self._results_dir}")
 
         # Create csv file and path for optimal_positions
         self._opt_positions_path = self._results_dir / f"{now}_optimal_positions.csv"
@@ -229,7 +234,6 @@ class Portfolio:
         self._start_capital = start_capital
         self._unallocated_capital = start_capital
         self._reserved_capital = Decimal(0)
-        self._base_currency = base_currency
 
     def _append_to_csv(self, target_csv: str, new_values: dict) -> None:
 
