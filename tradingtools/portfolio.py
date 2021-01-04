@@ -217,7 +217,7 @@ class Portfolio:
             "fee_currency",
             "fee_base_currency",
             "slippage",
-            "delta_value",
+            "order_value",
         ]
 
         with open(self._settlements_path, "w") as csv_file:
@@ -389,7 +389,7 @@ class Portfolio:
         settled_order["slippage"] = Decimal(price_settlement) - Decimal(
             settled_order["price_execution"]
         )
-        settled_order["delta_value"] = Decimal(order_value)
+        settled_order["order_value"] = Decimal(order_value)
 
         # Convert fee to base currency if needed
         if fee_currency != self._base_currency:
