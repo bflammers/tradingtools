@@ -38,8 +38,8 @@ def print_item(
     n_open_orders: int = None,
 ) -> str:
 
-    value_colored = color_number_sign(value, decimals=2)
-    out = f"{currency} {value_colored}"
+    # value_colored = color_number_sign(value, decimals=2)
+    out = f"{currency} {value:.3f}"
 
     if profit is not None:
         profit_colored = color_number_sign(profit)
@@ -47,7 +47,7 @@ def print_item(
 
     if profit_percentage is not None:
         profit_percentage_colored = color_number_sign(profit_percentage)
-        out += f" / {profit_percentage_colored} % profit"
+        out += f" / {profit_percentage_colored} %"
 
     if n_orders is not None:
         out += f" / {n_orders} orders"
