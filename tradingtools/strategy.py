@@ -1,5 +1,6 @@
 import numpy as np
 from collections import deque
+from decimal import Decimal
 
 
 class Strategy:
@@ -7,7 +8,7 @@ class Strategy:
         super().__init__()
         self.i = 0
 
-    def execute_on_tick(self, tick: list, context: dict = None) -> list:
+    def execute_on_tick(self, tick: list, context: dict = None) -> dict:
         """Executes the strategy on each tick of data (ohlc + extra context)
         manages its own state and produces a list of optimal portfolio allocations
         with one element per symbol
@@ -24,13 +25,19 @@ class Strategy:
 
 class MovingAverageCrossOverSingle(Strategy):
     def __init__(
-        self, symbol: str, n_smooth: int = 10, n_short: int = 100, n_long: int = 300
+        self,
+        symbol: str,
+        trading_amount: Decimal,
+        n_smooth: int = 10,
+        n_short: int = 100,
+        n_long: int = 300,
     ) -> None:
         super().__init__()
         self.symbol = symbol
         self.n_smooth = n_smooth
         self.n_short = n_short
         self.n_long = n_long
+        self.trading_amount = Decimal(trading_amount)
 
         # Initialize arrays
         self.short_que = deque(self.n_short * [0.0], maxlen=self.n_short)
@@ -47,7 +54,7 @@ class MovingAverageCrossOverSingle(Strategy):
 
         self.x = 0
 
-    def execute_on_tick(self, tick: list) -> list:
+    def execute_on_tick(self, tick: list) -> dict:
 
         # Hacky - but works for now
         tick = [x for x in tick if x["symbol"] == self.symbol][0]
@@ -72,15 +79,15 @@ class MovingAverageCrossOverSingle(Strategy):
 
         # Trading logic
         if self.i > self.n_long:
-            if short_mavg > long_mavg:
-                return [{"symbol": self.symbol, "volume": 0.001}]
+            if short_mavg >= long_mavg:
+                return {self.symbol: self.trading_amount}
 
-        return [{"symbol": self.symbol, "volume": 0}]
+        return {self.symbol: Decimal(0)}
 
 
 if __name__ == "__main__":
 
-    strat = MovingAverageCrossOverSingle("BTCUSD", n_smooth=0)
+    strat = MovingAverageCrossOverSingle("BTCUSD", Decimal('0.1'), n_smooth=0)
 
     tick = [
         {
@@ -106,5 +113,8 @@ if __name__ == "__main__":
     for i in range(301):
         optimal_positions = strat.execute_on_tick(tick)
 
-        if optimal_positions[0]["volume"] > 0:
+        if optimal_positions["BTCUSD"] > 0:
             print(f"{i} - {optimal_positions}")
+
+    
+

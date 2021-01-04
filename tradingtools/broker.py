@@ -49,15 +49,16 @@ class Broker:
 
         adjusted_order = self._adjust_order_for_exchange(order)
 
-        order_response = self._place_market_order(
-            symbol=adjusted_order["symbol"],
-            side=adjusted_order["order_type"],
-            amount=adjusted_order["volume"],
-        )
-
         if self.backtest:
             settlement = self._simulate_settlement(order, tick)
         else:
+
+            order_response = self._place_market_order(
+                symbol=adjusted_order["symbol"],
+                side=adjusted_order["side"],
+                amount=adjusted_order["amount"],
+            )
+
             settlement = {
                 "order_id": order["order_id"],
                 "exchange_order_id": order_response["id"],
@@ -114,13 +115,15 @@ class Broker:
 
         settlement = {
             "order_id": order["order_id"],
+            "symbol": order["symbol"],
             "exchange_order_id": uuid4().hex,
             "timestamp": timestamp_to_string(pd.Timestamp.now()),
             "fills": [],
             "price": price,
-            "amount": order["volume"],
-            "cost": price * order["volume"] + fee,
-            "average_cost": price * order["volume"],
+            "amount": order["amount"],
+            "filled": order["amount"],
+            "cost": price * order["amount"] + fee,
+            "average_cost": price * order["amount"],
             "fee": fee,
             "fee_currency": "EUR",
         }

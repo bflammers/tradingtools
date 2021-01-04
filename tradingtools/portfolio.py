@@ -190,7 +190,7 @@ class Portfolio:
             "symbol",
             "side",
             "amount",
-            "tick_timestamp",
+            "timestamp_tick",
             "price_execution",
             "cost_execution",
             "timestamp_execution",
@@ -207,7 +207,7 @@ class Portfolio:
             "symbol",
             "side",
             "amount",
-            "tick_timestamp",
+            "timestamp_tick",
             "price_execution",
             "cost_execution",
             "timestamp_execution",
@@ -215,8 +215,9 @@ class Portfolio:
             "timestamp_settlement",
             "fee",
             "fee_currency",
+            "fee_base_currency",
             "slippage",
-            "total_cost",
+            "delta_value",
         ]
 
         with open(self._settlements_path, "w") as csv_file:
@@ -234,10 +235,13 @@ class Portfolio:
 
         if target_csv == "opt_positions":
             column_names = self._opt_positions_columns
+            csv_path = self._opt_positions_path
         elif target_csv == "orders":
             column_names = self._orders_columns
+            csv_path = self._orders_path
         elif target_csv == "settlements":
             column_names = self._settlements_columns
+            csv_path = self._settlements_path
         else:
             raise NotImplementedError("[Portfolio] no append method for {target_csv}")
 
@@ -249,8 +253,9 @@ class Portfolio:
                 row.append(new_values[column])
             except KeyError:
                 row.append(None)
+                warnings.warn(f"[Portfolio._append_to_csv] key-value pair for {column} not in new values for {target_csv}")
 
-        with open(self._opt_positions_path, "a") as csv_file:
+        with open(csv_path, "a") as csv_file:
             writer = csv.writer(csv_file)
             writer.writerow(row)
 
@@ -487,7 +492,7 @@ if __name__ == "__main__":
 
     pf = Portfolio(100000)
 
-    for i in range(5000):
+    for i in range(50):
 
         optimal_positions = {
             "BTCUSD": 0,
@@ -543,3 +548,7 @@ if __name__ == "__main__":
             )
 
         print(pf)
+
+    print(pf.get_optimal_positions().head(5))
+    print(pf.get_orders().head(5))
+    print(pf.get_settled_orders().head(5))

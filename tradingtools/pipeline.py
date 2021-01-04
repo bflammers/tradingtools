@@ -70,18 +70,20 @@ class Pipeline:
                 settlement = self.broker.place_order(order, tick)
 
                 self.portfolio.settle_order(
+                    symbol_name=settlement["symbol"],
                     order_id=settlement["order_id"],
-                    price=settlement["price"],
+                    order_value=settlement["cost"],
+                    price_settlement=settlement["price"],
+                    timestamp_settlement=settlement["timestamp"],
                     fee=settlement["fee"],
                     fee_currency=settlement["fee_currency"],
-                    timestamp_settlement=settlement["timestamp"],
                 )
 
             # Increment counter
             self.i += 1
 
             if self.verbose:
-                if self.i % 1 == 0:
+                if self.i % 1000 == 0:
                     print(self.portfolio)
                     print(self.dataloader)
 
@@ -109,7 +111,7 @@ if __name__ == "__main__":
         dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern=None)
         dl.df['symbol'] = 'BTC/EUR'
 
-        strat = MovingAverageCrossOverSingle(symbol="BTC/EUR")
+        strat = MovingAverageCrossOverSingle(symbol="BTC/EUR", trading_amount=0.001)
         pf = Portfolio(5000)
 
         with open("./secrets.json", "r") as in_file:

@@ -2,6 +2,7 @@ import os
 import re
 from pathlib import Path
 from typing import Generator
+from decimal import Decimal
 
 import pandas as pd
 import numpy as np
@@ -48,11 +49,18 @@ class HistoricalOHLCLoader(DataLoader):
             files = [fn for fn in files if re.findall(extra_pattern, fn)]
 
         dfs = []
+        converters = {
+            "Open": Decimal,
+            "High": Decimal,
+            "Low": Decimal,
+            "Close": Decimal,
+            "Volume": Decimal,
+        }
 
         for i, fn in enumerate(files):
             fp = Path(path) / Path(fn)
             print(f"[Dataloader] >> loading file {i}/{len(files)} >> {fp}")
-            dfs.append(pd.read_csv(fp, skiprows=1).iloc[::-1])
+            dfs.append(pd.read_csv(fp, skiprows=1, converters=converters).iloc[::-1])
 
         print(f"[Dataloader] >> concatenating files")
         self.df = pd.concat(dfs)
@@ -61,14 +69,17 @@ class HistoricalOHLCLoader(DataLoader):
         self.df.columns = map(str.lower, self.df.columns)
         self.df["timestamp"] = pd.to_datetime(self.df["date"])
         self.df = self.df.set_index("timestamp", drop=False)
-        self.df = self.df.drop(columns=["date", "unix timestamp"])
-
+        self.df = self.df.drop(columns=["date"])
+        try:
+            self.df = self.df.drop(columns=["unix timestamp"])
+        except:
+            self.df = self.df.drop(columns=["unix"])
     def get_ticker(self) -> Generator:
         for self._i, (index, row) in enumerate(self.df.iterrows()):
 
             if self._verbose:
                 print(f"[Dataloader] >> processing row {self._i}/{self.n} >> {index}")
-            
+
             yield [row.to_dict()]
 
     def _resample_df(self, freq: str = "5T") -> None:
@@ -120,3 +131,7 @@ if __name__ == "__main__":
 
     for i, t in enumerate(ticker):
         print(t)
+        for _, x in t[0].items():
+            print(type(x))
+            print(x)
+        exit()
