@@ -40,8 +40,8 @@ class MovingAverageCrossOverSingle(Strategy):
         self.trading_amount = Decimal(trading_amount)
 
         # Initialize arrays
-        self.short_que = deque(self.n_short * [0.0], maxlen=self.n_short)
-        self.long_que = deque(self.n_long * [0.0], maxlen=self.n_long)
+        self.short_que = deque(self.n_short * [Decimal('0')], maxlen=self.n_short)
+        self.long_que = deque(self.n_long * [Decimal('0')], maxlen=self.n_long)
 
         # Initialize multiplying factors for smoothing
         if n_smooth is None or n_smooth == 0 or n_smooth == 1:
