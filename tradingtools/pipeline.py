@@ -23,7 +23,7 @@ class Pipeline:
         portfolio: Portfolio,
         broker: Broker,
         risk_management=None,
-        verbose=True, 
+        verbose=True,
     ) -> None:
         super().__init__()
 
@@ -55,37 +55,39 @@ class Pipeline:
             raise Exception("First initialize ticker")
 
         for tick in self.ticker:
+            self.single_run(tick)
 
-            # Pass to strategy -> optimal_positions
-            optimal_positions = self.strategy.execute_on_tick(tick)
-        
-            # Pass to porfolio -> order
-            orders = self.portfolio.update(tick, optimal_positions)
+    def single_run(self, tick) -> None:
 
-            for order in orders:
+        # Pass to strategy -> optimal_positions
+        optimal_positions = self.strategy.execute_on_tick(tick)
 
-                # TODO: make ASYNC w/ callback to add_settlement
+        # Pass to porfolio -> order
+        orders = self.portfolio.update(tick, optimal_positions)
 
-                # Pass to broker -> settlement back to portfolio
-                settlement = self.broker.place_order(order, tick)
+        for order in orders:
 
-                self.portfolio.settle_order(
-                    symbol_name=settlement["symbol"],
-                    order_id=settlement["order_id"],
-                    order_value=settlement["cost"],
-                    price_settlement=settlement["price"],
-                    timestamp_settlement=settlement["timestamp"],
-                    fee=settlement["fee"],
-                    fee_currency=settlement["fee_currency"],
-                )
+            # TODO: make ASYNC w/ callback to add_settlement
 
-            # Increment counter
-            self.i += 1
+            # Pass to broker -> settlement back to portfolio
+            settlement = self.broker.place_order(order, tick)
 
-            if self.verbose:
-                if self.i % 1000 == 0:
-                    print(self.portfolio)
-                    print(self.dataloader)
+            self.portfolio.settle_order(
+                symbol_name=settlement["symbol"],
+                order_id=settlement["order_id"],
+                order_value=settlement["cost"],
+                price_settlement=settlement["price"],
+                timestamp_settlement=settlement["timestamp"],
+                fee=settlement["fee"],
+                fee_currency=settlement["fee_currency"],
+            )
+
+        # Increment counter
+        self.i += 1
+
+        if self.verbose:
+            print(self.portfolio)
+            print(self.dataloader)
 
 
 if __name__ == "__main__":
@@ -93,7 +95,7 @@ if __name__ == "__main__":
     import signal
 
     def quit_gracefully(*args):
-        print('quitting loop')
+        print("quitting loop")
         exit(0)
 
     signal.signal(signal.SIGINT, quit_gracefully)
@@ -105,11 +107,11 @@ if __name__ == "__main__":
         from data import HistoricalOHLCLoader
         from strategy import MovingAverageCrossOverSingle
 
-    try: 
+    try:
 
         p = "./data/cryptodatadownload/binance/price"
         dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern=None)
-        dl.df['symbol'] = 'BTC/EUR'
+        dl.df["symbol"] = "BTC/EUR"
 
         strat = MovingAverageCrossOverSingle(symbol="BTC/EUR", trading_amount=0.001)
         pf = Portfolio(5000)

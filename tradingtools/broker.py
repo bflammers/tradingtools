@@ -1,6 +1,7 @@
 from uuid import uuid4
 import pandas as pd
 import ccxt
+from decimal import Decimal
 
 try:
     from .utils import extract_prices, timestamp_to_string
@@ -65,12 +66,13 @@ class Broker:
             settlement = {
                 "order_id": order["order_id"],
                 "exchange_order_id": order_response["id"],
+                "symbol": order_response["symbol"],
                 "timestamp": order_response["datetime"],
-                "price": order_response["price"],
-                "amount": order_response["amount"],
-                "cost": order_response["cost"],
-                "average_cost": order_response["average"],
-                "fee": order_response["fee"]["cost"],
+                "price": Decimal(order_response["price"]),
+                "amount": Decimal(order_response["amount"]),
+                "cost": Decimal(order_response["cost"]),
+                "average_cost": Decimal(order_response["average"]),
+                "fee": Decimal(order_response["fee"]["cost"]),
                 "fee_currency": order_response["fee"]["currency"],
             }
 
@@ -112,13 +114,12 @@ class Broker:
 
     def _simulate_settlement(self, order: dict, tick: list = []) -> dict:
 
-        prices_close = extract_prices(tick, "close")
         prices_high = extract_prices(tick, "high")
 
         if self.exchange_name == "binance":
-            fee = prices_close[order["symbol"]] / 1000
+            fee = order["cost_execution"] / 1000
         else:
-            fee = prices_close[order["symbol"]] / 100
+            fee = order["cost_execution"] / 100
 
         price = prices_high[order["symbol"]]
 

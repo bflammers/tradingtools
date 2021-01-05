@@ -4,8 +4,15 @@ from pathlib import Path
 from typing import Generator
 from decimal import Decimal
 
+import ccxt
+
 import pandas as pd
 import numpy as np
+
+try:
+    from .utils import timestamp_to_string
+except:
+    from utils import timestamp_to_string
 
 
 class DataLoader:
@@ -26,6 +33,53 @@ class DataLoader:
             Warning("DF not loaded")
 
         return self.df
+
+
+class OHLCLoader(DataLoader):
+    def __init__(
+        self, symbol: str, exchange: str = "binance", verbose: bool = True
+    ) -> None:
+        super().__init__(symbol, verbose=verbose)
+        self.symbol = symbol
+        self.exchange_name = exchange
+        self._tick_keys = ["timestamp", "open", "high", "low", "close", "volume"]
+        self._latest_timestamp = None
+        self._latest_close = None
+
+        if self.exchange_name == "binance":
+            self.exchange = ccxt.binance()
+        else:
+            raise NotImplementedError("[OHLCLoader] currently only Binance supported")
+
+    def get_ticker(self) -> Generator:
+
+        # Infinite generator
+        while True:
+
+            # Get data from exchange (single tick with limit=1, otherwise tick of last {limit} minutes)
+            data = self.exchange.fetch_ohlcv(self.symbol, limit=1)
+
+            # Transform to dict
+            tick = {"symbol": self.symbol}
+            for key, value in zip(self._tick_keys, data[-1]):
+
+                if key in ['open', 'high', 'low', 'close', 'volume']:
+                    tick[key] = Decimal(value)
+                else:
+                    tick[key] = value
+
+            self._latest_close = tick['close']
+            self._latest_timestamp = tick['timestamp']
+
+            yield [tick]
+
+    def __str__(self) -> str:
+
+        ts = timestamp_to_string(
+            pd.Timestamp(self._latest_timestamp, unit="ms")
+        )
+        out = f"[Dataloader] >> Tick timestamp: {ts} - close: {self._latest_close}"
+        return out
 
 
 class HistoricalOHLCLoader(DataLoader):
@@ -74,6 +128,7 @@ class HistoricalOHLCLoader(DataLoader):
             self.df = self.df.drop(columns=["unix timestamp"])
         except:
             self.df = self.df.drop(columns=["unix"])
+
     def get_ticker(self) -> Generator:
         for self._i, (index, row) in enumerate(self.df.iterrows()):
 
@@ -121,6 +176,18 @@ class CombinationLoader(DataLoader):
 
 
 if __name__ == "__main__":
+
+    import time
+
+    dl = OHLCLoader(symbol="BTC/EUR")
+
+    ticker = dl.get_ticker()
+
+    for tick in ticker:
+        print(f"Tick: {tick}")
+        time.sleep(5)
+
+    exit()
 
     p = "./data/cryptodatadownload/gemini/price"
 

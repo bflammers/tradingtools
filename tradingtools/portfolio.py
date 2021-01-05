@@ -7,8 +7,6 @@ from uuid import uuid4
 from decimal import Decimal
 from pathlib import Path
 
-from pandas.core.frame import DataFrame
-
 
 try:
     from .utils import (

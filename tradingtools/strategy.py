@@ -45,12 +45,11 @@ class MovingAverageCrossOverSingle(Strategy):
 
         # Initialize multiplying factors for smoothing
         if n_smooth is None or n_smooth == 0 or n_smooth == 1:
-            self._smooth_factor_history = 0
-            self._smooth_factor_current = 1
+            self._smooth_factor_history = Decimal('0')
+            self._smooth_factor_current = Decimal('1')
         else:
-            self._smooth_factor_history = (self.n_smooth - 1) / self.n_smooth
-            self._smooth_factor_current = 1 / self.n_smooth
-            assert self._smooth_factor_current + self._smooth_factor_history == 1.0
+            self._smooth_factor_history = Decimal((self.n_smooth - 1) / self.n_smooth)
+            self._smooth_factor_current = Decimal(1 / self.n_smooth)
 
         self.x = 0
 
