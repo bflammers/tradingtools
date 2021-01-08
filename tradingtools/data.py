@@ -104,6 +104,11 @@ class HistoricalOHLCLoader(DataLoader):
 
         dfs = []
         converters = {
+            "open": Decimal,
+            "high": Decimal,
+            "low": Decimal,
+            "close": Decimal,
+            "volume": Decimal,
             "Open": Decimal,
             "High": Decimal,
             "Low": Decimal,

@@ -3,6 +3,8 @@ import numpy as np
 
 import json
 
+from tradingtools.strategy import MovingAverageCrossOverOHLC
+
 try:
     from .data import HistoricalOHLCLoader
     from .strategy import Strategy
@@ -102,10 +104,10 @@ if __name__ == "__main__":
 
     try:
         from .data import HistoricalOHLCLoader
-        from .strategy import MovingAverageCrossOverSingle
+        from .strategy import MovingAverageCrossOverClose
     except ImportError:
         from data import HistoricalOHLCLoader
-        from strategy import MovingAverageCrossOverSingle
+        from strategy import MovingAverageCrossOverClose
 
     try:
 
@@ -113,7 +115,7 @@ if __name__ == "__main__":
         dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern=None)
         dl.df["symbol"] = "BTC/EUR"
 
-        strat = MovingAverageCrossOverSingle(symbol="BTC/EUR", trading_amount=0.001)
+        strat = MovingAverageCrossOverOHLC(symbol="BTC/EUR", trading_amount=0.1, metrics=["low", "close"])
         pf = Portfolio(5000)
 
         with open("./secrets.json", "r") as in_file:
