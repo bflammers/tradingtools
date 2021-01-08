@@ -39,6 +39,9 @@ class Broker:
                 "secret": secret_key,
                 "timeout": 30000,
                 "enableRateLimit": True,
+                'options': {
+                    'adjustForTimeDifference': True,  # resolves the recvWindow timestamp error
+                },
             }
         )
 

@@ -305,6 +305,10 @@ class Portfolio:
                 order = symbol.update_optimal_position(amount)
 
                 if order is not None:
+                    
+                    # Print order
+                    if self._verbose:
+                        print(f"[Portfolio.update] new order: {order}")
 
                     # Append orders if not None
                     orders.append(order)

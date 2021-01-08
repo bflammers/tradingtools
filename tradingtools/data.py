@@ -47,7 +47,14 @@ class OHLCLoader(DataLoader):
         self._latest_close = None
 
         if self.exchange_name == "binance":
-            self.exchange = ccxt.binance()
+            self.exchange = ccxt.binance(
+                {
+                    "enableRateLimit": True,
+                    'options': {
+                        'adjustForTimeDifference': True,  # resolves the recvWindow timestamp error
+                    },
+                }
+            )
         else:
             raise NotImplementedError("[OHLCLoader] currently only Binance supported")
 
