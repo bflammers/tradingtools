@@ -317,9 +317,16 @@ class Portfolio:
                     if order["side"] == "buy":
                         self._reserved_capital += order["cost_execution"]
 
-        # Write optimal postions and orders to file
-        self._write_optimal_positions(optimal_positions)
-        self._write_orders(orders)
+        # Write optimal postions if changed
+        if self._current_optimal_positions != optimal_positions:
+            self._write_optimal_positions(optimal_positions)
+        
+        # Update optimal positions
+        self._current_optimal_positions = optimal_positions
+
+        # Write order to log if any
+        if orders:
+            self._write_orders(orders)
 
         return orders
 
