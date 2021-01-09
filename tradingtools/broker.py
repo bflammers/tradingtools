@@ -41,6 +41,7 @@ class Broker:
                 "enableRateLimit": True,
                 'options': {
                     'adjustForTimeDifference': True,  # resolves the recvWindow timestamp error
+                    'recvWindow': 59999
                 },
             }
         )
