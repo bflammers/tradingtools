@@ -71,9 +71,7 @@ class Pipeline:
         # Sync with exchange
         symbol_amounts = self.broker.get_symbol_amounts()
         tick = self.dataloader.get_single_tick()
-        self.portfolio.sync(
-            symbol_amounts=symbol_amounts, tick=tick, initialize=initialize
-        )
+        self.portfolio.initialize(symbol_amounts, tick)
 
     def single_run(self, tick) -> None:
 

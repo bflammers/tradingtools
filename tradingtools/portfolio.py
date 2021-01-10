@@ -179,6 +179,9 @@ class Portfolio:
 
         # Construct orders list to append orders to
         orders = []
+        
+        # Sync prices
+        self.sync_prices(tick)
 
         # Update positions
         for trading_pair, amount in optimal_positions.items():
@@ -227,10 +230,32 @@ class Portfolio:
             self._write_orders(orders)
 
         return orders
-
-    def sync(self, symbol_amounts: dict, tick: list, initialize: bool = False) -> None:
-
+        
+    def initialize(self, symbol_amounts: dict, tick: list) -> None:
+        
+        self.sync_amounts(symbol_amounts)
+        self.sync_prices(tick)
+        
         starting_capital = 0
+        
+        for symbol in self.symbols.values():
+
+            starting_capital += symbol.get_current_value()
+        
+        self._unallocated_capital = symbol_amounts[self._reference_currency]
+        self._start_capital = starting_capital + self._unallocated_capital
+                
+        
+    def sync_prices(self, tick: list) -> None:
+        
+        for symbol_name, symbol in self.symbols.items():
+
+            trading_pair = f"{symbol_name}/{self._reference_currency}"
+            price, timestamp = self._extract_price_from_tick(tick, trading_pair)
+
+            symbol.sync_state(tick_timestamp=timestamp, price=price)
+
+    def sync_amounts(self, symbol_amounts: dict) -> None:
 
         for symbol_name, amount in symbol_amounts.items():
 
@@ -238,21 +263,12 @@ class Portfolio:
 
                 trading_pair = f"{symbol_name}/{self._reference_currency}"
                 amount = symbol_amounts[symbol_name]
-                price, timestamp = self._extract_price_from_tick(tick, trading_pair)
 
                 if symbol_name not in self.symbols:
                     self.symbols[symbol_name] = Symbol(symbol_name)
 
                 symbol = self.symbols[symbol_name]
-                symbol.sync_state(
-                    tick_timestamp=timestamp, price=price, current_amount=amount
-                )
-
-                starting_capital += amount * price
-
-        if initialize:
-            self._unallocated_capital = symbol_amounts[self._reference_currency]
-            self._start_capital = starting_capital + self._unallocated_capital
+                symbol.sync_state(current_amount=amount)
 
     @staticmethod
     def _extract_price_from_tick(

@@ -126,11 +126,17 @@ class Symbol:
         }
 
         return order
+        
+    def get_current_value(self) -> Decimal:
+        
+        # Calculate current value and profit so far
+        current_value = self._current_amount * self._latest_price
+        
+        return current_value
 
     def profit_and_loss(self) -> dict:
 
-        # Calculate current value and profit so far
-        current_value = self._current_amount * self._latest_price
+        current_value = self.get_current_value()
         current_profit = (
             current_value + self._total_value_at_sell - self._total_value_at_buy
         )
