@@ -26,13 +26,13 @@ class Strategy:
 class MovingAverageCrossOverClose(Strategy):
     def __init__(
         self,
-        symbol: str,
+        trading_pair: str,
         trading_amount: Decimal,
         n_short: int = 100,
         n_long: int = 300,
     ) -> None:
         super().__init__()
-        self.symbol = symbol
+        self.trading_pair = trading_pair
         self.n_short = n_short
         self.n_long = n_long
         self.trading_amount = Decimal(trading_amount)
@@ -44,12 +44,14 @@ class MovingAverageCrossOverClose(Strategy):
     def execute_on_tick(self, tick: list) -> dict:
 
         # Hacky - but works for now
-        tick = [x for x in tick if x["symbol"] == self.symbol][0]
+        tick = [x for x in tick if x["trading_pair"] == self.trading_pair][0]
 
         # Skip first 300 days to get full windows
         self.i += 1
 
-        return self._execute(tick["close"])
+        opt_position = self._execute(tick["close"])
+
+        return opt_position
 
     def _execute(self, x):
 
@@ -64,22 +66,22 @@ class MovingAverageCrossOverClose(Strategy):
         # Trading logic
         if self.i > self.n_long:
             if short_mavg >= long_mavg:
-                return {self.symbol: self.trading_amount}
+                return {self.trading_pair: self.trading_amount}
 
-        return {self.symbol: Decimal(0)}
+        return {self.trading_pair: Decimal(0)}
 
 
 class MovingAverageCrossOverOHLC(Strategy):
     def __init__(
         self,
-        symbol: str,
+        trading_pair: str,
         trading_amount: Decimal,
         n_short: int = 100,
         n_long: int = 300,
         metrics: list = ["open", "high", "low", "close"]
     ) -> None:
         super().__init__()
-        self.symbol = symbol
+        self.trading_pair = trading_pair
         self.n_short = n_short
         self.n_long = n_long
         self.trading_amount = Decimal(trading_amount)
@@ -104,7 +106,7 @@ class MovingAverageCrossOverOHLC(Strategy):
     def execute_on_tick(self, tick: list) -> dict:
 
         # Hacky - but works for now
-        tick = [x for x in tick if x["symbol"] == self.symbol][0]
+        tick = [x for x in tick if x["symbol"] == self.trading_pair][0]
 
         # Skip first n_long days to get full windows
         self.i += 1
@@ -133,9 +135,9 @@ class MovingAverageCrossOverOHLC(Strategy):
                 n_active += 1
 
         if self.i > self.n_long and n_active == len(self.metrics):
-            return {self.symbol: self.trading_amount}
+            return {self.trading_pair: self.trading_amount}
 
-        return {self.symbol: Decimal(0)}
+        return {self.trading_pair: Decimal(0)}
 
 
 if __name__ == "__main__":

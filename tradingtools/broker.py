@@ -16,7 +16,7 @@ class Broker:
         exchange_name: str = "binance",
         api_key: str = None,
         secret_key: str = None,
-        verbose: bool = True
+        verbose: bool = True,
     ) -> None:
         super().__init__()
         self.exchange = None
@@ -39,9 +39,9 @@ class Broker:
                 "secret": secret_key,
                 "timeout": 30000,
                 "enableRateLimit": True,
-                'options': {
-                    'adjustForTimeDifference': True,  # resolves the recvWindow timestamp error
-                    'recvWindow': 59999
+                "options": {
+                    "adjustForTimeDifference": True,  # resolves the recvWindow timestamp error
+                    "recvWindow": 59999,  # resolves the recvWindow timestamp error
                 },
             }
         )
@@ -53,7 +53,7 @@ class Broker:
 
     def place_order(self, order: dict, tick: list = []) -> dict:
 
-        # orders = {"symbol": "BTCUSD", "order_type": "buy", "volume": 10}
+        # orders = {"trading_pair": "BTCUSD", "side": "buy", "amount": 10}
 
         adjusted_order = self._adjust_order_for_exchange(order)
 
@@ -62,7 +62,7 @@ class Broker:
         else:
 
             order_response = self._place_market_order(
-                symbol=adjusted_order["symbol"],
+                trading_pair=adjusted_order["trading_pair"],
                 side=adjusted_order["side"],
                 amount=adjusted_order["amount"],
             )
@@ -70,7 +70,7 @@ class Broker:
             settlement = {
                 "order_id": order["order_id"],
                 "exchange_order_id": order_response["id"],
-                "symbol": order_response["symbol"],
+                "trading_pair": order_response["trading_pair"],
                 "timestamp": order_response["datetime"],
                 "price": Decimal(order_response["price"]),
                 "amount": Decimal(order_response["amount"]),
@@ -82,20 +82,27 @@ class Broker:
 
         return settlement
 
+    def get_symbol_amounts(self):
+        balance = self.exchange.fetch_balance()
+        symbol_amounts = {k: Decimal(v) for k, v in balance["free"].items() if v > 0}
+        return symbol_amounts
+
     def _adjust_order_for_exchange(self, order: dict) -> dict:
 
         adjusted_order = order.copy()
 
         if self.exchange_name == "binance":
 
-            symbol_mapping = {'BTCEUR': 'BTC/EUR', 'BTCUSD': 'BTC/USDT'}
+            trading_pair_mapping = {"BTCEUR": "BTC/EUR", "BTCUSD": "BTC/USDT"}
 
-            if order['symbol'] in symbol_mapping:
-                adjusted_order['symbol'] = symbol_mapping[order['symbol']]
+            if order["trading_pair"] in trading_pair_mapping:
+                adjusted_order["trading_pair"] = trading_pair_mapping[
+                    order["trading_pair"]
+                ]
 
         return adjusted_order
 
-    def _place_market_order(self, symbol, side, amount):
+    def _place_market_order(self, trading_pair, side, amount):
 
         # extra params and overrides if needed
         params = {
@@ -103,7 +110,7 @@ class Broker:
         }
 
         order_response = self.exchange.create_order(
-            symbol=symbol,
+            trading_pair=trading_pair,
             type="market",
             side=side,
             amount=amount,
@@ -125,11 +132,11 @@ class Broker:
         else:
             fee = order["cost_execution"] / 100
 
-        price = prices_high[order["symbol"]]
+        price = prices_high[order["trading_pair"]]
 
         settlement = {
             "order_id": order["order_id"],
-            "symbol": order["symbol"],
+            "trading_pair": order["trading_pair"],
             "exchange_order_id": uuid4().hex,
             "timestamp": timestamp_to_string(pd.Timestamp.now()),
             "fills": [],
@@ -148,30 +155,34 @@ class Broker:
 if __name__ == "__main__":
 
     order = {
-        "order_id": "448c10fd7af44d49b5667b90e412e1f6",
-        "symbol": "BTC/USDT",
-        "order_type": "sell",
-        "volume": 1.1874331869272101,
+        "order_id": uuid4().hex,
+        "trading_pair": "BTC/EUR",
+        "side": "buy",
+        "amount": Decimal("0.01"),
+        "timestamp_tick": timestamp_to_string(pd.Timestamp.now()),
+        "price_execution": Decimal("32009"),
+        "cost_execution": Decimal("0.01") * Decimal("32009"),
+        "timestamp_execution": timestamp_to_string(pd.Timestamp.now()),
     }
 
     tick = [
         {
-            "symbol": "BTC/USDT",
-            "open": 3902.52,
-            "high": 3908.0,
-            "low": 3902.25,
-            "close": 3902.25,
-            "volume": 0.25119066,
-            "timestamp": pd.Timestamp.now(),
+            "trading_pair": "BTC/EUR",
+            "open": Decimal(3902.52),
+            "high": Decimal(3908.0),
+            "low": Decimal(3902.25),
+            "close": Decimal(3902.25),
+            "volume": Decimal(0.25119066),
+            "timestamp": timestamp_to_string(pd.Timestamp.now()),
         },
         {
-            "symbol": "ETH/USD",
-            "open": 3902.52,
-            "high": 3908.0,
-            "low": 3902.25,
-            "close": 3902.25,
-            "volume": 0.25119066,
-            "timestamp": pd.Timestamp.now(),
+            "trading_pair": "ETH/USD",
+            "open": Decimal(3902.52),
+            "high": Decimal(3908.0),
+            "low": Decimal(3902.25),
+            "close": Decimal(3902.25),
+            "volume": Decimal(0.25119066),
+            "timestamp": timestamp_to_string(pd.Timestamp.now()),
         },
     ]
 
@@ -189,7 +200,7 @@ if __name__ == "__main__":
     sttl = brkr.place_order(order, tick)
     print(sttl)
 
-    print('\n\n----')
+    print("\n\n----")
     orders = brkr.exchange.fetch_orders("BTC/EUR")
     print(orders)
     print(len(orders))

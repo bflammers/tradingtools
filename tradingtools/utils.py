@@ -3,11 +3,11 @@ import pandas as pd
 import warnings
 
 
-def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
+def _warning_on_one_line(message, category, filename, lineno, file=None, line=None):
     return "%s:%s: %s: %s\n" % (filename, lineno, category.__name__, message)
 
 
-warnings.formatwarning = warning_on_one_line
+warnings.formatwarning = _warning_on_one_line
 
 
 class colors:
@@ -70,4 +70,4 @@ def string_to_timestamp(ts_string: str) -> pd.Timestamp:
 
 
 def extract_prices(tick: list, price_type: str = "close") -> dict:
-    return {t["symbol"]: Decimal(t[price_type]) for t in tick if price_type in t}
+    return {t["trading_pair"]: Decimal(t[price_type]) for t in tick if price_type in t}

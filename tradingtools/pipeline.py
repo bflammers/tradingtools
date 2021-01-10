@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 
 import json
+from tradingtools.portfolio import Symbol
 
 from tradingtools.strategy import MovingAverageCrossOverOHLC
 
@@ -25,6 +26,7 @@ class Pipeline:
         portfolio: Portfolio,
         broker: Broker,
         risk_management=None,
+        sync_exchange: bool = True,
         verbose=True,
     ) -> None:
         super().__init__()
@@ -41,13 +43,18 @@ class Pipeline:
 
         self.i = 0
         self.ticker = None
+        self._initialize_ticker()
+
+        # Sync with exchange
+        if sync_exchange:
+            self.sync_exchange(initialize=True)
 
     def _validate_inputs(self) -> None:
 
         # Check if inputs are consistent with one another
         pass
 
-    def initialize_ticker(self) -> None:
+    def _initialize_ticker(self) -> None:
         self.i = 0
         self.ticker = self.dataloader.get_ticker()
 
@@ -58,6 +65,15 @@ class Pipeline:
 
         for tick in self.ticker:
             self.single_run(tick)
+
+    def sync_exchange(self, initialize: bool = False) -> None:
+
+        # Sync with exchange
+        symbol_amounts = self.broker.get_symbol_amounts()
+        tick = self.dataloader.get_single_tick()
+        self.portfolio.sync(
+            symbol_amounts=symbol_amounts, tick=tick, initialize=initialize
+        )
 
     def single_run(self, tick) -> None:
 
@@ -75,7 +91,7 @@ class Pipeline:
             settlement = self.broker.place_order(order, tick)
 
             self.portfolio.settle_order(
-                symbol_name=settlement["symbol"],
+                trading_pair=settlement["trading_pair"],
                 order_id=settlement["order_id"],
                 order_value=settlement["cost"],
                 price_settlement=settlement["price"],
@@ -111,26 +127,30 @@ if __name__ == "__main__":
 
     try:
 
-        p = "./data/cryptodatadownload/binance/price"
-        dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern=None)
-        dl.df["symbol"] = "BTC/EUR"
+        backtest = True
 
-        strat = MovingAverageCrossOverOHLC(symbol="BTC/EUR", trading_amount=0.1, metrics=["low", "close"])
-        pf = Portfolio(5000)
+        p = "./data/cryptodatadownload/binance/price"
+        dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern="dev")
+        dl.df["trading_pair"] = "BTC/EUR"
+
+        strat = MovingAverageCrossOverOHLC(
+            trading_pair="BTC/EUR", trading_amount=0.1, metrics=["low", "close"]
+        )
+        pf = Portfolio(
+            5000, results_parent_dir="./runs/" + "backtest" if backtest else ""
+        )
 
         with open("./secrets.json", "r") as in_file:
             secrets = json.load(in_file)["binance"]
 
         brkr = Broker(
-            backtest=True,
+            backtest=backtest,
             exchange_name="binance",
             api_key=secrets["api_key"],
             secret_key=secrets["secret_key"],
         )
 
         pipeline = Pipeline(dataloader=dl, strategy=strat, portfolio=pf, broker=brkr)
-
-        pipeline.initialize_ticker()
 
         pipeline.run()
 

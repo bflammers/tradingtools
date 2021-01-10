@@ -16,13 +16,16 @@ except:
 
 
 class DataLoader:
-    def __init__(self, symbol: str, verbose: bool = False) -> None:
+    def __init__(self, trading_pair: str, verbose: bool = False) -> None:
         super().__init__()
 
         self.df = None
-        self.symbol = symbol
+        self.trading_pair = trading_pair
         self._verbose = verbose
         self._i = 0
+
+    def get_single_tick(self) -> list:
+        raise NotImplementedError("Base class")
 
     def get_ticker(self) -> Generator:
         raise NotImplementedError("Base class")
@@ -37,10 +40,10 @@ class DataLoader:
 
 class OHLCLoader(DataLoader):
     def __init__(
-        self, symbol: str, exchange: str = "binance", verbose: bool = True
+        self, trading_pair: str, exchange: str = "binance", verbose: bool = True
     ) -> None:
-        super().__init__(symbol, verbose=verbose)
-        self.symbol = symbol
+        super().__init__(trading_pair, verbose=verbose)
+        self.trading_pair = trading_pair
         self.exchange_name = exchange
         self._tick_keys = ["timestamp", "open", "high", "low", "close", "volume"]
         self._latest_timestamp = None
@@ -50,50 +53,58 @@ class OHLCLoader(DataLoader):
             self.exchange = ccxt.binance(
                 {
                     "enableRateLimit": True,
-                    'options': {
-                        'adjustForTimeDifference': True,  # resolves the recvWindow timestamp error
+                    "options": {
+                        "adjustForTimeDifference": True,  # resolves the recvWindow timestamp error
                     },
                 }
             )
         else:
             raise NotImplementedError("[OHLCLoader] currently only Binance supported")
 
+    def get_single_tick(self) -> list:
+
+        # Get data from exchange (single tick with limit=1, otherwise tick of last {limit} minutes)
+        data = self.exchange.fetch_ohlcv(self.trading_pair, limit=1)
+
+        # Transform to dict
+        tick = {"trading_pair": self.trading_pair}
+        for key, value in zip(self._tick_keys, data[-1]):
+
+            if key in ["open", "high", "low", "close", "volume"]:
+                tick[key] = Decimal(value)
+            else:
+                tick[key] = value
+
+        self._latest_close = tick["close"]
+        self._latest_timestamp = tick["timestamp"]
+
+        return [tick]
+
     def get_ticker(self) -> Generator:
 
         # Infinite generator
         while True:
 
-            # Get data from exchange (single tick with limit=1, otherwise tick of last {limit} minutes)
-            data = self.exchange.fetch_ohlcv(self.symbol, limit=1)
+            tick = self.get_single_tick()
 
-            # Transform to dict
-            tick = {"symbol": self.symbol}
-            for key, value in zip(self._tick_keys, data[-1]):
-
-                if key in ['open', 'high', 'low', 'close', 'volume']:
-                    tick[key] = Decimal(value)
-                else:
-                    tick[key] = value
-
-            self._latest_close = tick['close']
-            self._latest_timestamp = tick['timestamp']
-
-            yield [tick]
+            yield tick
 
     def __str__(self) -> str:
 
-        ts = timestamp_to_string(
-            pd.Timestamp(self._latest_timestamp, unit="ms")
-        )
+        ts = timestamp_to_string(pd.Timestamp(self._latest_timestamp, unit="ms"))
         out = f"[Dataloader] >> Tick timestamp: {ts} - close: {self._latest_close}"
         return out
 
 
 class HistoricalOHLCLoader(DataLoader):
     def __init__(
-        self, symbol: str, path: str, extra_pattern: str = None, verbose: bool = False
+        self,
+        trading_pair: str,
+        path: str,
+        extra_pattern: str = None,
+        verbose: bool = False,
     ) -> None:
-        super().__init__(symbol, verbose)
+        super().__init__(trading_pair, verbose)
 
         self._load_price_data(path, extra_pattern)
 
@@ -103,7 +114,7 @@ class HistoricalOHLCLoader(DataLoader):
     def _load_price_data(self, path: str, extra_pattern: str) -> None:
 
         files = os.listdir(path)
-        files = [fn for fn in files if re.findall(self.symbol, fn)]
+        files = [fn for fn in files if re.findall(self.trading_pair, fn)]
         files.sort()
 
         if extra_pattern is not None:
@@ -133,6 +144,7 @@ class HistoricalOHLCLoader(DataLoader):
 
         # Modifying df
         self.df.columns = map(str.lower, self.df.columns)
+        self.df = self.df.rename({"symbol": "trading_pair"})
         self.df["timestamp"] = pd.to_datetime(self.df["date"])
         self.df = self.df.set_index("timestamp", drop=False)
         self.df = self.df.drop(columns=["date"])
@@ -140,6 +152,10 @@ class HistoricalOHLCLoader(DataLoader):
             self.df = self.df.drop(columns=["unix timestamp"])
         except:
             self.df = self.df.drop(columns=["unix"])
+
+    def get_single_tick(self) -> list:
+        raise NotImplementedError()
+        # return self.df.iloc[0].to_dict()
 
     def get_ticker(self) -> Generator:
         for self._i, (index, row) in enumerate(self.df.iterrows()):
@@ -174,8 +190,8 @@ class HistoricalOHLCLoader(DataLoader):
 
 
 class CombinationLoader(DataLoader):
-    def __init__(self, symbol: str) -> None:
-        super().__init__(symbol)
+    def __init__(self, trading_pair: str) -> None:
+        super().__init__(trading_pair)
         self.dataloaders = dict()
         raise NotImplementedError
 
@@ -189,21 +205,21 @@ class CombinationLoader(DataLoader):
 
 if __name__ == "__main__":
 
-    import time
+    # import time
 
-    dl = OHLCLoader(symbol="BTC/EUR")
+    # dl = OHLCLoader(symbol="BTC/EUR")
 
-    ticker = dl.get_ticker()
+    # ticker = dl.get_ticker()
 
-    for tick in ticker:
-        print(f"Tick: {tick}")
-        time.sleep(5)
+    # for tick in ticker:
+    #     print(f"Tick: {tick}")
+    #     time.sleep(5)
 
-    exit()
+    # exit()
 
-    p = "./data/cryptodatadownload/gemini/price"
+    p = "./data/cryptodatadownload/binance/price"
 
-    dl = HistoricalOHLCLoader("BTCUSD", p, "2019")
+    dl = HistoricalOHLCLoader("BTCUSD", p, "dev")
     dl.df.head()
 
     ticker = dl.get_ticker()
