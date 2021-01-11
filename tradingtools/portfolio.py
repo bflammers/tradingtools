@@ -75,6 +75,7 @@ class Portfolio:
         self._orders_columns = [
             "order_id",
             "trading_pair",
+            "status",
             "side",
             "amount",
             "timestamp_tick",
@@ -89,6 +90,7 @@ class Portfolio:
         self._settlements_columns = [
             "order_id",
             "trading_pair",
+            "status",
             "side",
             "amount",
             "timestamp_tick",
@@ -267,9 +269,6 @@ class Portfolio:
 
             if symbol_name != self._reference_currency:
 
-                trading_pair = f"{symbol_name}/{self._reference_currency}"
-                amount = symbol_amounts[symbol_name]
-
                 if symbol_name not in self.symbols:
                     self.symbols[symbol_name] = Symbol(symbol_name)
 
@@ -332,6 +331,7 @@ class Portfolio:
         self,
         trading_pair: str,
         order_id: str,
+        status: str,
         order_value: Decimal,
         price_settlement: Decimal,
         timestamp_settlement: pd.Timestamp,
@@ -356,6 +356,7 @@ class Portfolio:
         )
 
         # Add settlement details to order
+        settled_order["status"] = status
         settled_order["price_settlement"] = Decimal(price_settlement)
         settled_order["timestamp_settlement"] = timestamp_settlement
         settled_order["fee"] = Decimal(fee)
@@ -513,6 +514,7 @@ if __name__ == "__main__":
             pf.settle_order(
                 trading_pair=order["trading_pair"],
                 order_id=id,
+                status=order['status'],
                 price_settlement=price,
                 timestamp_settlement=ts,
                 fee=fee,

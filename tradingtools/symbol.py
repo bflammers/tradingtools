@@ -57,24 +57,22 @@ class Symbol:
 
             # Convert to decimal
             current_amount = Decimal(current_amount)
-            
+
             if current_amount != self._current_amount:
 
                 # Update total value at buy/sell with Delta
                 diff_amount = current_amount - self._current_amount
                 self._total_value_at_buy += self._latest_price * diff_amount
 
-                # Update 
+                # Update
                 self._current_amount = current_amount
 
     def update_optimal_position(self, optimal_amount: Decimal) -> dict:
 
-        if optimal_amount != self.optimal_amount:
+        if abs(optimal_amount - self.optimal_amount) >= Decimal("0.001"):
 
-            # Construct order
-            delta = Decimal(optimal_amount) - (
-                self._current_amount + self._pending_delta_amount
-            )
+            # Construct order - NOT DELTA WITH CURRENT AMOUNT - LEADS TO MINIMAL AMOUNT ISSUES AT EXCHANGE
+            delta = optimal_amount - (self._current_amount + self._pending_delta_amount)
             side = "buy" if delta > 0 else "sell"
             amount = abs(delta)
             order = self._create_order(amount, side)
@@ -117,6 +115,7 @@ class Symbol:
         order = {
             "order_id": uuid.uuid4().hex,
             "trading_pair": f"{self.symbol_name}/{quote_currency}",
+            "status": "pending",
             "side": side,
             "amount": Decimal(amount),
             "timestamp_tick": self._latest_tick_timestamp,
@@ -126,12 +125,12 @@ class Symbol:
         }
 
         return order
-        
+
     def get_current_value(self) -> Decimal:
-        
+
         # Calculate current value and profit so far
         current_value = self._current_amount * self._latest_price
-        
+
         return current_value
 
     def profit_and_loss(self) -> dict:

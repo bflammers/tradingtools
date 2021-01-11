@@ -91,6 +91,7 @@ class Pipeline:
             self.portfolio.settle_order(
                 trading_pair=settlement["trading_pair"],
                 order_id=settlement["order_id"],
+                status=settlement["status"],
                 order_value=settlement["cost"],
                 price_settlement=settlement["price"],
                 timestamp_settlement=settlement["timestamp"],

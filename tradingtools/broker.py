@@ -4,9 +4,9 @@ import ccxt
 from decimal import Decimal
 
 try:
-    from .utils import extract_prices, timestamp_to_string
+    from .utils import extract_prices, timestamp_to_string, warnings
 except:
-    from utils import extract_prices, timestamp_to_string
+    from utils import extract_prices, timestamp_to_string, warnings
 
 
 class Broker:
@@ -23,6 +23,7 @@ class Broker:
         self.backtest = backtest
         self.exchange_name = exchange_name
         self._verbose = verbose
+        self._min_order_amount = Decimal(0.001)
 
         if not self.backtest:
 
@@ -55,30 +56,46 @@ class Broker:
 
         # orders = {"trading_pair": "BTCUSD", "side": "buy", "amount": 10}
 
-        adjusted_order = self._adjust_order_for_exchange(order)
+        settlement = {
+            "order_id": order["order_id"],
+            "status": "pending",
+            "trading_pair": order["trading_pair"],
+            "exchange_order_id": None,
+            "timestamp": None,
+            "price": None,
+            "amount": None,
+            "cost": None,
+            "average_cost": None,
+            "fee": None,
+            "fee_currency": None,
+        }
+
+        adjusted_order = self._prep_order_for_exchange(order)
 
         if self.backtest:
-            settlement = self._simulate_settlement(order, tick)
+            order_response = self._simulate_order_response(order, tick)
         else:
 
-            order_response = self._place_market_order(
-                trading_pair=adjusted_order["trading_pair"],
-                side=adjusted_order["side"],
-                amount=adjusted_order["amount"],
-            )
+            try: 
+                order_response = self._place_market_order(
+                    trading_pair=adjusted_order["trading_pair"],
+                    side=adjusted_order["side"],
+                    amount=adjusted_order["amount"],
+                )
+            except:
+                settlement["status"] = "failed"
+                return settlement
+                
 
-            settlement = {
-                "order_id": order["order_id"],
-                "exchange_order_id": order_response["id"],
-                "trading_pair": order_response["symbol"],
-                "timestamp": order_response["datetime"],
-                "price": Decimal(order_response["price"]),
-                "amount": Decimal(order_response["amount"]),
-                "cost": Decimal(order_response["cost"]),
-                "average_cost": Decimal(order_response["average"]),
-                "fee": Decimal(order_response["fee"]["cost"]),
-                "fee_currency": order_response["fee"]["currency"],
-            }
+        settlement["status"] = "completed"
+        settlement["exchange_order_id"] = order_response["id"]
+        settlement["timestamp"] = order_response["datetime"]
+        settlement["price"] = Decimal(order_response["price"])
+        settlement["amount"] = Decimal(order_response["amount"])
+        settlement["cost"] = Decimal(order_response["cost"])
+        settlement["average_cost"] = Decimal(order_response["average"])
+        settlement["fee"] = Decimal(order_response["fee"]["cost"])
+        settlement["fee_currency"] = order_response["fee"]["currency"]
 
         return settlement
 
@@ -87,11 +104,16 @@ class Broker:
         symbol_amounts = {k: Decimal(v) for k, v in balance["free"].items() if v > 0}
         return symbol_amounts
 
-    def _adjust_order_for_exchange(self, order: dict) -> dict:
+    def _prep_order_for_exchange(self, order: dict) -> dict:
 
         adjusted_order = order.copy()
 
         if self.exchange_name == "binance":
+
+            if order["amount"] < (self._min_order_amount - Decimal(0.00001)):
+                warnings.warn(
+                    f"[Broker._prep_order_for_exchange] order {order['order_id']} amount smaller than exchange smallest order amount"
+                )
 
             trading_pair_mapping = {"BTCEUR": "BTC/EUR", "BTCUSD": "BTC/USDT"}
 
@@ -123,7 +145,7 @@ class Broker:
 
         return order_response
 
-    def _simulate_settlement(self, order: dict, tick: list = []) -> dict:
+    def _simulate_order_response(self, order: dict, tick: list = []) -> dict:
 
         prices_high = extract_prices(tick, "high")
 
@@ -134,22 +156,17 @@ class Broker:
 
         price = prices_high[order["trading_pair"]]
 
-        settlement = {
-            "order_id": order["order_id"],
-            "trading_pair": order["trading_pair"],
-            "exchange_order_id": uuid4().hex,
-            "timestamp": timestamp_to_string(pd.Timestamp.now()),
-            "fills": [],
+        order_response = {
+            "id": uuid4().hex,
+            "datetime": timestamp_to_string(pd.Timestamp.now()),
             "price": price,
             "amount": order["amount"],
-            "filled": order["amount"],
             "cost": price * order["amount"] + fee,
-            "average_cost": price * order["amount"],
-            "fee": fee,
-            "fee_currency": "EUR",
+            "average": price * order["amount"],
+            "fee": {"cost": fee, "currency": "EUR"},
         }
 
-        return settlement
+        return order_response
 
 
 if __name__ == "__main__":
