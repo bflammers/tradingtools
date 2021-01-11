@@ -233,8 +233,8 @@ class Portfolio:
         
     def initialize(self, symbol_amounts: dict, tick: list) -> None:
         
+        self.sync_prices(tick) # Should be called before sync_amounts
         self.sync_amounts(symbol_amounts)
-        self.sync_prices(tick)
         
         starting_capital = 0
         
@@ -248,10 +248,16 @@ class Portfolio:
         
     def sync_prices(self, tick: list) -> None:
         
-        for symbol_name, symbol in self.symbols.items():
+        for t in tick:
 
-            trading_pair = f"{symbol_name}/{self._reference_currency}"
+            trading_pair = t['trading_pair']
+            base, quote = trading_pair.split('/')
+
+            if base not in self.symbols:
+                self.symbols[base] = Symbol(base)
+
             price, timestamp = self._extract_price_from_tick(tick, trading_pair)
+            symbol = self.symbols[base]
 
             symbol.sync_state(tick_timestamp=timestamp, price=price)
 
