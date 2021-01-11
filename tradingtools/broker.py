@@ -70,7 +70,7 @@ class Broker:
             settlement = {
                 "order_id": order["order_id"],
                 "exchange_order_id": order_response["id"],
-                "trading_pair": order_response["trading_pair"],
+                "trading_pair": order_response["symbol"],
                 "timestamp": order_response["datetime"],
                 "price": Decimal(order_response["price"]),
                 "amount": Decimal(order_response["amount"]),
@@ -110,7 +110,7 @@ class Broker:
         }
 
         order_response = self.exchange.create_order(
-            trading_pair=trading_pair,
+            symbol=trading_pair,
             type="market",
             side=side,
             amount=amount,
