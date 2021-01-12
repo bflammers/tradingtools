@@ -1,21 +1,21 @@
 import pandas as pd
 import numpy as np
 
+import threading
 import json
-from tradingtools.portfolio import Symbol
-
-from tradingtools.strategy import MovingAverageCrossOverOHLC
 
 try:
     from .data import HistoricalOHLCLoader
-    from .strategy import Strategy
+    from .strategy import Strategy, MovingAverageCrossOverOHLC
     from .portfolio import Portfolio
     from .broker import Broker
 except:
     from data import HistoricalOHLCLoader
-    from strategy import Strategy
+    from strategy import Strategy, MovingAverageCrossOverOHLC
     from portfolio import Portfolio
     from broker import Broker
+
+from .utils import threadsafe_generator
 
 
 class Pipeline:
@@ -47,7 +47,7 @@ class Pipeline:
 
         # Sync with exchange
         if sync_exchange:
-            self.sync_exchange(initialize=True)
+            self._sync_exchange(initialize=True)
 
     def _validate_inputs(self) -> None:
 
@@ -58,22 +58,49 @@ class Pipeline:
         self.i = 0
         self.ticker = self.dataloader.get_ticker()
 
-    def run(self) -> None:
+    def sync_exchange(self, threaded: bool = False) -> None:
 
-        if self.ticker is None:
-            raise Exception("First initialize ticker")
+        if threaded:
+            job_thread = threading.Thread(target=self._sync_exchange)
+            job_thread.start()
+        else:
+            self._sync_exchange()
 
-        for tick in self.ticker:
-            self.single_run(tick)
-
-    def sync_exchange(self, initialize: bool = False) -> None:
+    def _sync_exchange(self, initialize: bool = False) -> None:
 
         # Sync with exchange
         symbol_amounts = self.broker.get_symbol_amounts()
         tick = self.dataloader.get_single_tick()
         self.portfolio.initialize(symbol_amounts, tick)
 
-    def single_run(self, tick) -> None:
+    def run(self) -> None:
+
+        if self.ticker is None:
+            raise Exception("First initialize ticker")
+
+        for tick in self.ticker:
+            self._execute(tick)
+
+    def single_run(self, threaded: bool = False) -> None:
+
+        if threaded:
+            job_thread = threading.Thread(target=self._single_run)
+            job_thread.start()
+        else:
+            self._single_run()
+
+    def _single_run(self) -> None:
+
+        if self.ticker is None:
+            raise Exception("First initialize ticker")
+
+        # Get next tick
+        tick = self.ticker.__next__()
+
+        # Execute pipeline
+        self._execute(tick)
+
+    def _execute(self, tick: list) -> None:
 
         # Pass to strategy -> optimal_positions
         optimal_positions = self.strategy.execute_on_tick(tick)
@@ -128,8 +155,8 @@ if __name__ == "__main__":
 
         backtest = True
 
-        p = "./data/cryptodatadownload/binance/price"
-        dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern="dev")
+        p = "./data/cryptodatadownload/gemini/price"
+        dl = HistoricalOHLCLoader("BTCUSD", p, extra_pattern="2019")
         dl.df["trading_pair"] = "BTC/EUR"
 
         strat = MovingAverageCrossOverOHLC(

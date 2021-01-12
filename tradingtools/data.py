@@ -1,5 +1,6 @@
 import os
 import re
+
 from pathlib import Path
 from typing import Generator
 from decimal import Decimal
@@ -10,9 +11,9 @@ import pandas as pd
 import numpy as np
 
 try:
-    from .utils import timestamp_to_string
+    from .utils import timestamp_to_string, threadsafe_generator
 except:
-    from utils import timestamp_to_string
+    from utils import timestamp_to_string, threadsafe_generator
 
 
 class DataLoader:
@@ -27,6 +28,7 @@ class DataLoader:
     def get_single_tick(self) -> list:
         raise NotImplementedError("Base class")
 
+    @threadsafe_generator
     def get_ticker(self) -> Generator:
         raise NotImplementedError("Base class")
 
@@ -80,6 +82,7 @@ class OHLCLoader(DataLoader):
 
         return [tick]
 
+    @threadsafe_generator
     def get_ticker(self) -> Generator:
 
         # Infinite generator
@@ -157,6 +160,7 @@ class HistoricalOHLCLoader(DataLoader):
         raise NotImplementedError()
         # return self.df.iloc[0].to_dict()
 
+    @threadsafe_generator
     def get_ticker(self) -> Generator:
         for self._i, (index, row) in enumerate(self.df.iterrows()):
 
@@ -198,6 +202,7 @@ class CombinationLoader(DataLoader):
     def add_dataloader(self, key: str, dataloader: DataLoader) -> None:
         self.dataloaders[key] = dataloader
 
+    @threadsafe_generator
     def get_ticker(self) -> Generator:
         """Generator that provides an iterator over all dataloaders"""
         raise NotImplementedError()
