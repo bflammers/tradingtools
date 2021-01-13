@@ -28,7 +28,7 @@ class Symbol:
         self._current_amount = Decimal(0)
         self._pending_delta_amount = Decimal(0)
         self._open_orders = {}
-        self._latest_price = Decimal(0)
+        self._latest_price = None
         self._latest_tick_timestamp = None
         self._n_orders = 0
         self._total_value_at_buy = Decimal(0)
@@ -111,6 +111,9 @@ class Symbol:
     def _create_order(
         self, amount: Decimal, side: str, quote_currency: str = "EUR"
     ) -> dict:
+
+        if self._latest_price is None:
+            raise Exception("[Symbol._create_order] price not set through sync_state")
 
         order = {
             "order_id": uuid.uuid4().hex,
