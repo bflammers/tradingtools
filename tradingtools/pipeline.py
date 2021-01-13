@@ -15,8 +15,6 @@ except:
     from portfolio import Portfolio
     from broker import Broker
 
-from .utils import threadsafe_generator
-
 
 class Pipeline:
     def __init__(

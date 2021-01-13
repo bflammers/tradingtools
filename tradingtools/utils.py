@@ -2,6 +2,10 @@ from decimal import Decimal
 import pandas as pd
 import warnings
 import threading
+import csv
+
+from uuid import uuid4
+from pathlib import Path
 
 
 def _warning_on_one_line(message, category, filename, lineno, file=None, line=None):
@@ -98,3 +102,61 @@ def threadsafe_generator(f):
         return _threadsafe_iter(f(*a, **kw))
 
     return g
+
+
+class CSVWriter:
+    def __init__(self, path: Path, columns: list) -> None:
+        super().__init__()
+
+        self.path = path
+        self.columns = columns
+        self._create_csv(self.path, self.columns)
+
+    @staticmethod
+    def _create_csv(path: str, columns: list) -> None:
+
+        # Create file and write header
+        with open(path, "w") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(columns)
+
+    def append(self, new_values: dict) -> None:
+
+        row = []
+
+        for column in self.columns:
+
+            try:
+                row.append(new_values[column])
+            except KeyError:
+                row.append(None)
+                warnings.warn(
+                    f"[CSVWriter.append] key-value pair for {column} not in new values for {self.path}"
+                )
+
+        with open(self.path, "a") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(row)
+
+    def append_multiple(
+        self, new_values_list: list, add_uuid: bool = False, add_timestamp: bool = False
+    ) -> None:
+        
+        # Common fields
+        id = uuid4().hex
+        timestamp = timestamp_to_string(pd.Timestamp.now())
+
+        # Update volume for each symbol, add new if not yet present
+        for new_values in new_values_list:
+
+            if add_uuid:
+                new_values["id"] = id
+
+            if add_timestamp:
+                new_values["timestamp"] = timestamp
+
+            self.append(new_values=new_values)
+
+    def read(self) -> pd.DataFrame:
+        df = pd.read_csv(self.path)
+        return df
