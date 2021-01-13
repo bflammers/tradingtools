@@ -49,6 +49,7 @@ def test_update_optimal_positions():
 
     s = Symbol("BTC")
 
+    # First need to set price through sync_state
     with pytest.raises(Exception):
         order = s.update_optimal_position(amount1)
 
