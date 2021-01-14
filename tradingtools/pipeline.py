@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 
+from uuid import uuid4
+from pathlib import Path
+
 import threading
 import json
 
@@ -9,11 +12,13 @@ try:
     from .strategy import Strategy, MovingAverageCrossOverOHLC
     from .portfolio import Portfolio
     from .broker import Broker
+    from .utils import CSVWriter
 except:
     from data import HistoricalOHLCLoader
     from strategy import Strategy, MovingAverageCrossOverOHLC
     from portfolio import Portfolio
     from broker import Broker
+    from utils import CSVWriter
 
 
 class Pipeline:
@@ -25,6 +30,7 @@ class Pipeline:
         broker: Broker,
         risk_management=None,
         sync_exchange: bool = True,
+        results_parent_dir: str = "./runs",
         verbose=True,
     ) -> None:
         super().__init__()
@@ -34,12 +40,9 @@ class Pipeline:
         self.risk_management = risk_management
         self.portfolio = portfolio
         self.broker = broker
-
         self.verbose = verbose
 
         self._validate_inputs()
-
-        self.i = 0
         self.ticker = None
         self._initialize_ticker()
 
@@ -47,13 +50,77 @@ class Pipeline:
         if sync_exchange:
             self._sync_exchange(initialize=True)
 
+        # Create directory for results
+        now = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
+        ts_uuid = f"{now}_{uuid4().hex}"
+        self._results_dir = (Path(results_parent_dir) / ts_uuid).absolute()
+        self._results_dir.mkdir(parents=True, exist_ok=True)
+
+        if self.verbose:
+            print(f"[Portfolio] results directory created: {self._results_dir}")
+
+        self._tick_writer = CSVWriter(
+            path=self._results_dir / f"{now}_ticks.csv",
+            columns=[
+                "id",
+                "trading_pair",
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+            ],
+        )
+
+        self._opt_positions_writer = CSVWriter(
+            path=self._results_dir / f"{now}_optimal_positions.csv",
+            columns=["id", "timestamp", "symbol", "amount"],
+        )
+        self._prev_optimal_positions = None
+
+        self._orders_writer = CSVWriter(
+            path=self._results_dir / f"{now}_orders.csv",
+            columns=[
+                "order_id",
+                "trading_pair",
+                "side",
+                "amount",
+                "timestamp_tick",
+                "price_execution",
+                "cost_execution",
+                "timestamp_execution",
+            ],
+        )
+
+        self._settlements_writer = CSVWriter(
+            path=self._results_dir / f"{now}_settlements.csv",
+            columns=[
+                "order_id",
+                "trading_pair",
+                "status",
+                "side",
+                "amount",
+                "timestamp_tick",
+                "price_execution",
+                "cost_execution",
+                "timestamp_execution",
+                "price_settlement",
+                "timestamp_settlement",
+                "fee",
+                "fee_currency",
+                "fee_reference_currency",
+                "slippage",
+                "order_value",
+            ],
+        )
+
     def _validate_inputs(self) -> None:
 
         # Check if inputs are consistent with one another
         pass
 
     def _initialize_ticker(self) -> None:
-        self.i = 0
         self.ticker = self.dataloader.get_ticker()
 
     def sync_exchange(self, threaded: bool = False) -> None:
@@ -100,11 +167,28 @@ class Pipeline:
 
     def _execute(self, tick: list) -> None:
 
+        # Write tick to file
+        self._tick_writer.append_multiple(tick, add_uuid=True)
+
         # Pass to strategy -> optimal_positions
         optimal_positions = self.strategy.execute_on_tick(tick)
 
+        # Write optimal postions if changed
+        if self._prev_optimal_positions != optimal_positions:
+            opt_positions_list = [
+                {"symbol": s, "amount": a} for s, a in optimal_positions.items()
+            ]
+            self._opt_positions_writer.append_multiple(
+                opt_positions_list, add_timestamp=True, add_uuid=True
+            )
+            self._prev_optimal_positions = optimal_positions
+
         # Pass to porfolio -> order
         orders = self.portfolio.update(tick, optimal_positions)
+
+        # Write order to log if any
+        if orders:
+            self._orders_writer.append_multiple(orders)
 
         for order in orders:
 
@@ -113,7 +197,7 @@ class Pipeline:
             # Pass to broker -> settlement back to portfolio
             settlement = self.broker.place_order(order, tick)
 
-            self.portfolio.settle_order(
+            settled_order = self.portfolio.settle_order(
                 trading_pair=settlement["trading_pair"],
                 order_id=settlement["order_id"],
                 status=settlement["status"],
@@ -124,12 +208,28 @@ class Pipeline:
                 fee_currency=settlement["fee_currency"],
             )
 
-        # Increment counter
-        self.i += 1
+            # Write to csv
+            self._settlements_writer.append(settled_order)
 
         if self.verbose:
             print(self.portfolio)
             print(self.dataloader)
+
+    def get_ticks(self) -> pd.DataFrame:
+        df = self._tick_writer.read()
+        return df
+
+    def get_optimal_positions(self) -> pd.DataFrame:
+        df = self._opt_positions_writer.read()
+        return df
+
+    def get_orders(self) -> pd.DataFrame:
+        df = self._orders_writer.read()
+        return df
+
+    def get_settled_orders(self) -> pd.DataFrame:
+        df = self._settlements_writer.read()
+        return df
 
 
 if __name__ == "__main__":
@@ -144,10 +244,10 @@ if __name__ == "__main__":
 
     try:
         from .data import HistoricalOHLCLoader
-        from .strategy import MovingAverageCrossOverClose
+        from .strategy import MovingAverageCrossOverOHLC
     except ImportError:
         from data import HistoricalOHLCLoader
-        from strategy import MovingAverageCrossOverClose
+        from strategy import MovingAverageCrossOverOHLC
 
     try:
 

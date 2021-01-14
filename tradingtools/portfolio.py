@@ -1,7 +1,5 @@
 import pandas as pd
 import numpy as np
-import uuid
-import csv
 
 from uuid import uuid4
 from decimal import Decimal
@@ -15,7 +13,6 @@ try:
         warnings,
         timestamp_to_string,
         print_item,
-        CSVWriter,
     )
     from .symbol import Symbol
 except:
@@ -25,7 +22,6 @@ except:
         warnings,
         timestamp_to_string,
         print_item,
-        CSVWriter,
     )
     from symbol import Symbol
 
@@ -34,7 +30,6 @@ class Portfolio:
     def __init__(
         self,
         starting_capital: Decimal = None,
-        results_parent_dir: str = "./runs",
         reference_currency: str = "EUR",
         verbose: bool = True,
     ) -> None:
@@ -43,77 +38,6 @@ class Portfolio:
         self._verbose = verbose
         self._reference_currency = reference_currency
         self.symbols = {}
-
-        # Create directory for results
-        now = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
-        ts_uuid = f"{now}_{uuid4().hex}"
-        self._results_dir = (Path(results_parent_dir) / ts_uuid).absolute()
-        self._results_dir.mkdir(parents=True, exist_ok=True)
-
-        if self._verbose:
-            print(f"[Portfolio] results directory created: {self._results_dir}")
-
-        # Create csv file and path for ticks
-        self._tick_ohlcv_columns = [
-            "id",
-            "trading_pair",
-            "timestamp",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-        ]
-        self._tick_ohlcv_writer = CSVWriter(
-            path=self._results_dir / f"{now}_ticks.csv",
-            columns=self._tick_ohlcv_columns,
-        )
-
-        # Create csv file and path for optimal_positions
-        self._opt_positions_columns = ["id", "timestamp", "symbol", "amount"]
-        self._opt_positions_writer = CSVWriter(
-            path=self._results_dir / f"{now}_optimal_positions.csv",
-            columns=self._opt_positions_columns,
-        )
-
-        # Create csv file and path for orders
-        self._orders_columns = [
-            "order_id",
-            "trading_pair",
-            "side",
-            "amount",
-            "timestamp_tick",
-            "price_execution",
-            "cost_execution",
-            "timestamp_execution",
-        ]
-        self._orders_writer = CSVWriter(
-            path=self._results_dir / f"{now}_orders.csv", columns=self._orders_columns
-        )
-
-        # Create csv file and path for orders
-        self._settlements_columns = [
-            "order_id",
-            "trading_pair",
-            "status",
-            "side",
-            "amount",
-            "timestamp_tick",
-            "price_execution",
-            "cost_execution",
-            "timestamp_execution",
-            "price_settlement",
-            "timestamp_settlement",
-            "fee",
-            "fee_currency",
-            "fee_reference_currency",
-            "slippage",
-            "order_value",
-        ]
-        self._settlements_writer = CSVWriter(
-            path=self._results_dir / f"{now}_settlements.csv",
-            columns=self._settlements_columns,
-        )
 
         # Initialize state objects
         self._current_optimal_positions = {}
@@ -142,9 +66,6 @@ class Portfolio:
 
         if self._starting_capital is None:
             raise Exception("No starting capital --> first call initialize")
-
-        # Write tick to file
-        self._tick_ohlcv_writer.append_multiple(tick, add_uuid=True)
 
         # Construct orders list to append orders to
         orders = []
@@ -187,21 +108,8 @@ class Portfolio:
                     if order["side"] == "buy":
                         self._reserved_capital += order["cost_execution"]
 
-        # Write optimal postions if changed
-        if self._current_optimal_positions != optimal_positions:
-            opt_positions_list = [
-                {"symbol": s, "amount": a} for s, a in optimal_positions.items()
-            ]
-            self._opt_positions_writer.append_multiple(
-                opt_positions_list, add_uuid=True, add_timestamp=True
-            )
-
         # Update optimal positions
         self._current_optimal_positions = optimal_positions
-
-        # Write order to log if any
-        if orders:
-            self._orders_writer.append_multiple(orders)
 
         return orders
 
@@ -264,7 +172,7 @@ class Portfolio:
         timestamp_settlement: pd.Timestamp,
         fee: Decimal,
         fee_currency: str,
-    ) -> None:
+    ) -> dict:
 
         """Adds a settlement to an order and updates asset volumes and value at buy when the
         order has been filled. Uses the order_id to id the corresponding order in the orders df
@@ -315,24 +223,7 @@ class Portfolio:
         else:
             raise Exception("[Portfolio.settle_order] side order not buy or sell")
 
-        # Write to csv
-        self._settlements_writer.append(settled_order)
-
-    def get_ticks(self) -> pd.DataFrame:
-        df = self._tick_ohlcv_writer.read()
-        return df
-
-    def get_optimal_positions(self) -> pd.DataFrame:
-        df = self._opt_positions_writer.read()
-        return df
-
-    def get_orders(self) -> pd.DataFrame:
-        df = self._orders_writer.read()
-        return df
-
-    def get_settled_orders(self) -> pd.DataFrame:
-        df = self._settlements_writer.read()
-        return df
+        return settled_order
 
     def profit_and_loss(self) -> dict:
 
