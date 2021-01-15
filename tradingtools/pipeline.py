@@ -11,13 +11,13 @@ try:
     from .data import HistoricalOHLCLoader
     from .strategy import Strategy, MovingAverageCrossOverOHLC
     from .portfolio import Portfolio
-    from .broker import Broker
+    from .broker import Broker, Order, Settlement
     from .utils import CSVWriter
 except:
     from data import HistoricalOHLCLoader
     from strategy import Strategy, MovingAverageCrossOverOHLC
     from portfolio import Portfolio
-    from broker import Broker
+    from broker import Broker, Order, Settlement
     from utils import CSVWriter
 
 
@@ -45,6 +45,7 @@ class Pipeline:
         self._validate_inputs()
         self.ticker = None
         self._initialize_ticker()
+        self._prev_optimal_positions = None
 
         # Sync with exchange
         if sync_exchange:
@@ -77,42 +78,15 @@ class Pipeline:
             path=self._results_dir / f"{now}_optimal_positions.csv",
             columns=["id", "timestamp", "symbol", "amount"],
         )
-        self._prev_optimal_positions = None
 
         self._orders_writer = CSVWriter(
             path=self._results_dir / f"{now}_orders.csv",
-            columns=[
-                "order_id",
-                "trading_pair",
-                "side",
-                "amount",
-                "timestamp_tick",
-                "price_execution",
-                "cost_execution",
-                "timestamp_execution",
-            ],
+            columns=list(Order.__annotations__)
         )
 
-        self._settlements_writer = CSVWriter(
-            path=self._results_dir / f"{now}_settlements.csv",
-            columns=[
-                "order_id",
-                "trading_pair",
-                "status",
-                "side",
-                "amount",
-                "timestamp_tick",
-                "price_execution",
-                "cost_execution",
-                "timestamp_execution",
-                "price_settlement",
-                "timestamp_settlement",
-                "fee",
-                "fee_currency",
-                "fee_reference_currency",
-                "slippage",
-                "order_value",
-            ],
+        self._settled_orders_writer = CSVWriter(
+            path=self._results_dir / f"{now}_settled_orders.csv",
+            columns=list(Order.__annotations__)
         )
 
     def _validate_inputs(self) -> None:
@@ -197,19 +171,10 @@ class Pipeline:
             # Pass to broker -> settlement back to portfolio
             settlement = self.broker.place_order(order, tick)
 
-            settled_order = self.portfolio.settle_order(
-                trading_pair=settlement["trading_pair"],
-                order_id=settlement["order_id"],
-                status=settlement["status"],
-                order_value=settlement["cost"],
-                price_settlement=settlement["price"],
-                timestamp_settlement=settlement["timestamp"],
-                fee=settlement["fee"],
-                fee_currency=settlement["fee_currency"],
-            )
+            settled_order = self.portfolio.settle_order(settlement=settlement)
 
             # Write to csv
-            self._settlements_writer.append(settled_order)
+            self._settled_orders_writer.append(settled_order)
 
         if self.verbose:
             print(self.portfolio)
@@ -228,13 +193,14 @@ class Pipeline:
         return df
 
     def get_settled_orders(self) -> pd.DataFrame:
-        df = self._settlements_writer.read()
+        df = self._settled_orders_writer.read()
         return df
 
 
 if __name__ == "__main__":
 
     import signal
+    from decimal import Decimal
 
     def quit_gracefully(*args):
         print("quitting loop")
@@ -260,9 +226,7 @@ if __name__ == "__main__":
         strat = MovingAverageCrossOverOHLC(
             trading_pair="BTC/EUR", trading_amount=0.1, metrics=["low", "close"]
         )
-        pf = Portfolio(
-            5000, results_parent_dir="./runs/" + "backtest" if backtest else ""
-        )
+        pf = Portfolio(Decimal(5000))
 
         with open("./secrets.json", "r") as in_file:
             secrets = json.load(in_file)["binance"]
@@ -274,7 +238,14 @@ if __name__ == "__main__":
             secret_key=secrets["secret_key"],
         )
 
-        pipeline = Pipeline(dataloader=dl, strategy=strat, portfolio=pf, broker=brkr)
+        pipeline = Pipeline(
+            dataloader=dl,
+            strategy=strat,
+            portfolio=pf,
+            broker=brkr,
+            results_parent_dir="./runs/" + "backtest" if backtest else "",
+            sync_exchange=True,
+        )
 
         pipeline.run()
 

@@ -128,6 +128,8 @@ class CSVWriter:
 
             try:
                 row.append(new_values[column])
+            except TypeError:
+                row.append(getattr(new_values, column))
             except KeyError:
                 row.append(None)
                 warnings.warn(
@@ -160,3 +162,4 @@ class CSVWriter:
     def read(self) -> pd.DataFrame:
         df = pd.read_csv(self.path)
         return df
+

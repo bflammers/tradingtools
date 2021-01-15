@@ -1,12 +1,12 @@
 import pandas as pd
 import numpy as np
+import typing
 
 from uuid import uuid4
 from decimal import Decimal
-from pathlib import Path
-
 
 try:
+    from .broker import Order, Settlement
     from .utils import (
         colors,
         extract_prices,
@@ -14,8 +14,8 @@ try:
         timestamp_to_string,
         print_item,
     )
-    from .symbol import Symbol
 except:
+    from broker import Order, Settlement
     from utils import (
         colors,
         extract_prices,
@@ -23,10 +23,168 @@ except:
         timestamp_to_string,
         print_item,
     )
-    from symbol import Symbol
+
+
+class Symbol:
+    _open_orders: typing.Dict[str, Order]
+
+    def __init__(self, symbol_name: str) -> None:
+        super().__init__()
+        self.symbol_name = symbol_name
+        self.optimal_amount = Decimal(0)
+        self._current_amount = Decimal(0)
+        self._pending_delta_amount = Decimal(0)
+        self._open_orders = {}
+        self._latest_price = Decimal(0)
+        self._latest_tick_timestamp = None
+        self._n_orders = 0
+        self._total_value_at_buy = Decimal(0)
+        self._total_value_at_sell = Decimal(0)
+        self._min_order_amount = Decimal("0.001")
+
+    def sync_state(
+        self,
+        tick_timestamp: str = None,
+        price: Decimal = None,
+        current_amount: Decimal = None,
+    ) -> None:
+
+        if tick_timestamp is not None:
+            self._latest_tick_timestamp = tick_timestamp
+
+        if price is not None:
+
+            if tick_timestamp is None:
+                warnings.warn(
+                    "[Portfolio.Symbol] tick_timestamp should be provided with latest price"
+                )
+
+            self._latest_price = Decimal(price)
+
+        if current_amount is not None:
+
+            # Convert to decimal
+            current_amount = Decimal(current_amount)
+
+            if current_amount != self._current_amount:
+
+                # Update total value at buy/sell with Delta
+                diff_amount = current_amount - self._current_amount
+                self._total_value_at_buy += self._latest_price * diff_amount
+
+                # Update
+                self._current_amount = current_amount
+
+    def update_optimal_position(self, optimal_amount: Decimal) -> Order:
+
+        if abs(optimal_amount - self.optimal_amount) >= self._min_order_amount:
+
+            # Construct order - NOT DELTA WITH CURRENT AMOUNT - LEADS TO MINIMAL AMOUNT ISSUES AT EXCHANGE
+            delta = optimal_amount - (self._current_amount + self._pending_delta_amount)
+            side = "buy" if delta > 0 else "sell"
+            amount = abs(delta)
+
+            # Create order
+            order = self._create_order(amount, side)
+
+            # Update state
+            self.optimal_amount = optimal_amount
+            self._open_orders[order.order_id] = order
+            self._n_orders += 1
+            self._pending_delta_amount += delta
+
+            return order
+
+        return None
+
+    def settle_and_retrieve_order(self, settlement: Settlement) -> Order:
+
+        # Retrieve open order and delete from open orders
+        order = self._open_orders.pop(settlement.order_id)
+
+        # Settle order
+        order.settle(settlement=settlement)
+
+        # Update symbol state
+        if order.side == "buy":
+            self._current_amount += Decimal(order.amount)
+            self._pending_delta_amount -= Decimal(order.amount)
+            self._total_value_at_buy += Decimal(order.value_settlement)
+        elif order.side == "sell":
+            self._current_amount -= Decimal(order.amount)
+            self._pending_delta_amount += Decimal(order.amount)
+            self._total_value_at_sell += Decimal(order.value_settlement)
+        else:
+            raise Exception(
+                f"[Portfolio.Symbol] side {order.side} not known should be buy or sell"
+            )
+
+        return order
+
+    def _create_order(
+        self, amount: Decimal, side: str, quote_currency: str = "EUR"
+    ) -> Order:
+
+        if self._latest_price is None:
+            raise Exception("[Symbol._create_order] price not set through sync_state")
+
+        order = Order(
+            order_id=uuid4().hex,
+            trading_pair=f"{self.symbol_name}/{quote_currency}",
+            status="pending",
+            side=side,
+            amount=Decimal(amount),
+            timestamp_tick=self._latest_tick_timestamp,
+            price_execution=Decimal(self._latest_price),
+            cost_execution=Decimal(amount) * Decimal(self._latest_price),
+            timestamp_execution=timestamp_to_string(pd.Timestamp.now()),
+        )
+
+        return order
+
+    def get_current_value(self) -> Decimal:
+
+        # Calculate current value and profit so far
+        current_value = self._current_amount * self._latest_price
+
+        return current_value
+
+    def profit_and_loss(self) -> dict:
+
+        current_value = self.get_current_value()
+        current_profit = (
+            current_value + self._total_value_at_sell - self._total_value_at_buy
+        )
+
+        # Collect in dict
+        pnl = {
+            "amount": self._current_amount,
+            "value": current_value,
+            "profit": current_profit,
+            "n_orders": self._n_orders,
+            "n_open_orders": len(self._open_orders),
+            "timestamp_valuation": self._latest_tick_timestamp,
+        }
+
+        return pnl
+
+    def __str__(self, currency: str = "EUR") -> str:
+        pnl = self.profit_and_loss()
+
+        out = f"{self.symbol_name}: "
+        out += print_item(
+            currency=currency,
+            value=pnl["value"],
+            profit=pnl["profit"],
+            n_orders=pnl["n_orders"],
+        )
+
+        return out
 
 
 class Portfolio:
+    symbols: typing.Dict[str, Symbol]
+
     def __init__(
         self,
         starting_capital: Decimal = None,
@@ -37,7 +195,7 @@ class Portfolio:
 
         self._verbose = verbose
         self._reference_currency = reference_currency
-        self.symbols = {}
+        self.symbols = dict()
 
         # Initialize state objects
         self._current_optimal_positions = {}
@@ -105,8 +263,9 @@ class Portfolio:
                     orders.append(order)
 
                     # Reserve capital if buy
-                    if order["side"] == "buy":
-                        self._reserved_capital += order["cost_execution"]
+                    if order.side == "buy":
+                        self._reserved_capital += order.cost_execution
+                        self._unallocated_capital -= order.cost_execution
 
         # Update optimal positions
         self._current_optimal_positions = optimal_positions
@@ -162,17 +321,7 @@ class Portfolio:
             if t["trading_pair"] == trading_pair:
                 return t[price_type], t["timestamp"]
 
-    def settle_order(
-        self,
-        trading_pair: str,
-        order_id: str,
-        status: str,
-        order_value: Decimal,
-        price_settlement: Decimal,
-        timestamp_settlement: pd.Timestamp,
-        fee: Decimal,
-        fee_currency: str,
-    ) -> dict:
+    def settle_order(self, settlement: Settlement) -> dict:
 
         """Adds a settlement to an order and updates asset volumes and value at buy when the
         order has been filled. Uses the order_id to id the corresponding order in the orders df
@@ -180,46 +329,21 @@ class Portfolio:
         """
 
         # Split trading pair
-        base, quote = trading_pair.split("/")
+        base, quote = settlement.trading_pair.split("/")
 
         # Get symbol
         symbol = self.symbols[base]
 
         # Settle order
-        settled_order = symbol.add_settlement(
-            order_id, order_value=Decimal(order_value)
-        )
-
-        # Add settlement details to order
-        settled_order["status"] = status
-        settled_order["price_settlement"] = Decimal(price_settlement)
-        settled_order["timestamp_settlement"] = timestamp_settlement
-        settled_order["fee"] = Decimal(fee)
-        settled_order["fee_currency"] = fee_currency
-        settled_order["slippage"] = Decimal(price_settlement) - Decimal(
-            settled_order["price_execution"]
-        )
-        settled_order["order_value"] = Decimal(order_value)
-
-        # Convert fee to base currency if needed
-        if fee_currency != self._reference_currency:
-            fee_reference_currency = Decimal(price_settlement) * Decimal(fee)
-            settled_order["fee_reference_currency"] = fee_reference_currency
-        else:
-            settled_order["fee_reference_currency"] = fee
+        settled_order = symbol.settle_and_retrieve_order(settlement=settlement)
 
         # Update unallocated and reserved capital
-        if settled_order["side"] == "buy":
+        if settled_order.side == "buy":
             # Free reserved capital only if side was buy
-            self._reserved_capital -= order_value
-
-            # Subtract from unallocated capital
-            self._unallocated_capital -= order_value
-
-        elif settled_order["side"] == "sell":
+            self._reserved_capital -= settled_order.cost_execution
+        elif settled_order.side == "sell":
             # Add to unallocated capital
-            self._unallocated_capital += order_value
-
+            self._unallocated_capital += settled_order.value_settlement
         else:
             raise Exception("[Portfolio.settle_order] side order not buy or sell")
 
@@ -287,38 +411,42 @@ class Portfolio:
 
 if __name__ == "__main__":
 
-    pf = Portfolio(100000, results_parent_dir="./runs/backtest")
+    s = Symbol("BTC")
+    s.sync_state(tick_timestamp="2020...", price=Decimal("1"))
+    print(s)
+
+    pf = Portfolio(starting_capital=Decimal(10000))
 
     for i in range(50):
 
         optimal_positions = {
-            "BTC/EUR": 0,
-            "ETH/EUR": 0,
+            "BTC/EUR": Decimal(0),
+            "ETH/EUR": Decimal(0),
         }
 
         if np.random.choice([False, True]):
             optimal_positions = {
-                "BTC/EUR": np.random.uniform(high=10),
-                "ETH/EUR": np.random.uniform(high=10),
+                "BTC/EUR": Decimal(np.random.uniform(high=10)),
+                "ETH/EUR": Decimal(np.random.uniform(high=10)),
             }
 
         tick = [
             {
                 "trading_pair": "BTC/EUR",
-                "open": 3902.52,
-                "high": 3908.0,
-                "low": 3902.25,
-                "close": np.random.uniform(3500, 4000),
-                "volume": 0.25119066,
+                "open": Decimal(3902.52),
+                "high": Decimal(3908.0),
+                "low": Decimal(3902.25),
+                "close": Decimal(np.random.uniform(3500, 4000)),
+                "volume": Decimal(0.25119066),
                 "timestamp": pd.Timestamp.now(),
             },
             {
                 "trading_pair": "ETH/EUR",
-                "open": 3902.52,
-                "high": 3908.0,
-                "low": 3902.25,
-                "close": np.random.uniform(3500, 4000),
-                "volume": 0.25119066,
+                "open": Decimal(3902.52),
+                "high": Decimal(3908.0),
+                "low": Decimal(3902.25),
+                "close": Decimal(np.random.uniform(3500, 4000)),
+                "volume": Decimal(0.25119066),
                 "timestamp": pd.Timestamp.now(),
             },
         ]
@@ -328,24 +456,16 @@ if __name__ == "__main__":
         prices = extract_prices(tick, "close")
 
         for order in orders:
-            id = order["order_id"]
-            price = prices[order["trading_pair"]]
-            fee = 0  # price / 100
-            ts = timestamp_to_string(pd.Timestamp.now())
-            cost = price * order["amount"] + fee
-            pf.settle_order(
-                trading_pair=order["trading_pair"],
-                order_id=id,
-                status=order["status"],
-                price_settlement=price,
-                timestamp_settlement=ts,
-                fee=fee,
-                fee_currency="EUR",
-                order_value=cost,
+            settlement = Settlement(
+                order_id=order.order_id,
+                trading_pair=order.trading_pair,
+                status="completed",
+                price=Decimal(prices[order.trading_pair]),
+                fee=Decimal(0),
+                timestamp=timestamp_to_string(pd.Timestamp.now()),
+                cost=Decimal(prices[order.trading_pair]) * order.amount,
+                value=Decimal(prices[order.trading_pair]) * order.amount
             )
+            pf.settle_order(settlement)
 
         print(pf)
-
-    print(pf.get_optimal_positions().head(5))
-    print(pf.get_orders().head(5))
-    print(pf.get_settled_orders().head(5))

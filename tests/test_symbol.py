@@ -100,7 +100,7 @@ def test_add_settlement():
     assert s.get_current_value() == Decimal(0)
     assert s._pending_delta_amount == amount1
 
-    s.add_settlement(order_id=order["order_id"], order_value=order_value1)
+    s.settle_order(order_id=order["order_id"], order_value=order_value1)
 
     assert s._current_amount == amount1
     assert s.get_current_value() == amount1 * price1
@@ -122,7 +122,7 @@ def test_profit_and_loss():
 
     s.sync_state(tick_timestamp=ts, price=price1)
     order = s.update_optimal_position(amount1)
-    s.add_settlement(order_id=order["order_id"], order_value=order_value1)
+    s.settle_order(order_id=order["order_id"], order_value=order_value1)
 
     pnl = s.profit_and_loss()
 
@@ -132,7 +132,7 @@ def test_profit_and_loss():
 
     s.sync_state(tick_timestamp=ts, price=price2)
     order = s.update_optimal_position(amount2)
-    s.add_settlement(order_id=order["order_id"], order_value=order_value2)
+    s.settle_order(order_id=order["order_id"], order_value=order_value2)
 
     pnl = s.profit_and_loss()
 

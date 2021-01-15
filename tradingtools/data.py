@@ -111,6 +111,7 @@ class HistoricalOHLCLoader(DataLoader):
 
         self._load_price_data(path, extra_pattern)
 
+        self._i = 0
         self.n = self.df.shape[0]
         print(f"[Dataloader] >> shape loaded df: {self.df.shape}")
 
@@ -157,8 +158,8 @@ class HistoricalOHLCLoader(DataLoader):
             self.df = self.df.drop(columns=["unix"])
 
     def get_single_tick(self) -> list:
-        raise NotImplementedError()
-        # return self.df.iloc[0].to_dict()
+        tick = self.df.iloc[self._i].to_dict()
+        return [tick]
 
     @threadsafe_generator
     def get_ticker(self) -> Generator:

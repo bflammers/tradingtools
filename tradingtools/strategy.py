@@ -106,7 +106,7 @@ class MovingAverageCrossOverOHLC(Strategy):
     def execute_on_tick(self, tick: list) -> dict:
 
         # Hacky - but works for now
-        tick = [x for x in tick if x["symbol"] == self.trading_pair][0]
+        tick = [x for x in tick if x["trading_pair"] == self.trading_pair][0]
 
         # Skip first n_long days to get full windows
         self.i += 1
