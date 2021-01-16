@@ -1,13 +1,13 @@
 
 import pandas as pd 
 
-from tradingtools import utils
+from tradingtools.utils import timestamp_to_string, string_to_timestamp
 
 def test_timestamp_conversion():
 
     ts = pd.Timestamp.now()
-    ts_str = utils.timestamp_to_string(ts)
-    ts2 = utils.string_to_timestamp(ts_str)
+    ts_str = timestamp_to_string(ts)
+    ts2 = string_to_timestamp(ts_str)
     assert ts == ts2
 
 

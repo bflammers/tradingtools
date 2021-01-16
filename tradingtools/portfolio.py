@@ -203,6 +203,56 @@ class Portfolio:
         self._starting_capital = None
         self._unallocated_capital = None
 
+    def initialize(self, amounts: dict, tick: list) -> None:
+
+        self.sync(tick=tick, amounts=amounts)
+
+        starting_capital = 0
+
+        for symbol in self.symbols.values():
+
+            starting_capital += symbol.get_current_value()
+
+        self._unallocated_capital = amounts[self._reference_currency]
+        self._starting_capital = starting_capital + self._unallocated_capital
+
+    def sync(self, tick: list = None, amounts: dict = None) -> None:
+
+        # Prices should be set before amounts
+        if tick is not None:
+            self._sync_prices(tick)
+
+        if amounts is not None:
+            self._sync_amounts(amounts)
+
+    def _sync_prices(self, tick: list) -> None:
+
+        for t in tick:
+
+            trading_pair = t["trading_pair"]
+            base, quote = trading_pair.split("/")
+
+            if base not in self.symbols:
+                self.symbols[base] = Symbol(base)
+
+            price, timestamp = self._extract_price_from_tick(tick, trading_pair)
+            symbol = self.symbols[base]
+
+            symbol.sync_state(tick_timestamp=timestamp, price=price)
+
+    def _sync_amounts(self, symbol_amounts: dict) -> None:
+
+        for symbol_name, amount in symbol_amounts.items():
+
+            if symbol_name == self._reference_currency:
+                self._unallocated_capital = amount
+            else:
+                if symbol_name not in self.symbols:
+                    self.symbols[symbol_name] = Symbol(symbol_name)
+
+                symbol = self.symbols[symbol_name]
+                symbol.sync_state(current_amount=amount)
+
     def update(self, tick: list, optimal_positions: dict = {}) -> list:
 
         """Update the portfolio using the new optimal positions (from strategy)
@@ -271,64 +321,6 @@ class Portfolio:
 
         return orders
 
-    def initialize(self, amounts: dict, tick: list) -> None:
-
-        self.sync(tick=tick, amounts=amounts)
-
-        starting_capital = 0
-
-        for symbol in self.symbols.values():
-
-            starting_capital += symbol.get_current_value()
-
-        self._unallocated_capital = amounts[self._reference_currency]
-        self._starting_capital = starting_capital + self._unallocated_capital
-
-    def sync(self, tick: list = None, amounts: dict = None) -> None:
-
-        # Prices should be set before amounts
-        if tick is not None:
-            self._sync_prices(tick)
-
-        if amounts is not None:
-            self._sync_amounts(amounts)
-
-    def _sync_prices(self, tick: list) -> None:
-
-        for t in tick:
-
-            trading_pair = t["trading_pair"]
-            base, quote = trading_pair.split("/")
-
-            if base not in self.symbols:
-                self.symbols[base] = Symbol(base)
-
-            price, timestamp = self._extract_price_from_tick(tick, trading_pair)
-            symbol = self.symbols[base]
-
-            symbol.sync_state(tick_timestamp=timestamp, price=price)
-
-    def _sync_amounts(self, symbol_amounts: dict) -> None:
-
-        for symbol_name, amount in symbol_amounts.items():
-
-            if symbol_name == self._reference_currency:
-                self._unallocated_capital = amount
-            else:
-                if symbol_name not in self.symbols:
-                    self.symbols[symbol_name] = Symbol(symbol_name)
-
-                symbol = self.symbols[symbol_name]
-                symbol.sync_state(current_amount=amount)
-
-    @staticmethod
-    def _extract_price_from_tick(
-        tick: list, trading_pair: str, price_type: str = "close"
-    ) -> tuple:
-        for t in tick:
-            if t["trading_pair"] == trading_pair:
-                return t[price_type], t["timestamp"]
-
     def settle_order(self, settlement: Settlement) -> Order:
 
         """Adds a settlement to an order and updates asset volumes and value at buy when the
@@ -349,6 +341,12 @@ class Portfolio:
         if settled_order.side == "buy":
             # Free reserved capital only if side was buy
             self._reserved_capital -= settled_order.cost_execution
+
+            # Subtract difference between cost settlement (actual cost) and cost execution
+            # (reserved cost) from unallocated capital
+            self._unallocated_capital -= (
+                settled_order.cost_settlement - settled_order.cost_execution
+            )
         elif settled_order.side == "sell":
             # Add to unallocated capital
             self._unallocated_capital += settled_order.value_settlement
@@ -397,6 +395,14 @@ class Portfolio:
         }
 
         return pnl
+
+    @staticmethod
+    def _extract_price_from_tick(
+        tick: list, trading_pair: str, price_type: str = "close"
+    ) -> tuple:
+        for t in tick:
+            if t["trading_pair"] == trading_pair:
+                return t[price_type], t["timestamp"]
 
     def __str__(self) -> str:
 
