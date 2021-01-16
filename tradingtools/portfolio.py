@@ -187,7 +187,6 @@ class Portfolio:
 
     def __init__(
         self,
-        starting_capital: Decimal = None,
         reference_currency: str = "EUR",
         verbose: bool = True,
     ) -> None:
@@ -201,8 +200,8 @@ class Portfolio:
         self._current_optimal_positions = {}
         self._reserved_capital = Decimal(0)
 
-        self._starting_capital = starting_capital
-        self._unallocated_capital = starting_capital
+        self._starting_capital = None
+        self._unallocated_capital = None
 
     def update(self, tick: list, optimal_positions: dict = {}) -> list:
 
@@ -229,7 +228,7 @@ class Portfolio:
         orders = []
 
         # Sync prices
-        self.sync_prices(tick)
+        self._sync_prices(tick)
 
         # Update positions
         for trading_pair, amount in optimal_positions.items():
@@ -272,10 +271,9 @@ class Portfolio:
 
         return orders
 
-    def initialize(self, symbol_amounts: dict, tick: list) -> None:
+    def initialize(self, amounts: dict, tick: list) -> None:
 
-        self.sync_prices(tick)  # Should be called before sync_amounts
-        self.sync_amounts(symbol_amounts)
+        self.sync(tick=tick, amounts=amounts)
 
         starting_capital = 0
 
@@ -283,10 +281,19 @@ class Portfolio:
 
             starting_capital += symbol.get_current_value()
 
-        self._unallocated_capital = symbol_amounts[self._reference_currency]
+        self._unallocated_capital = amounts[self._reference_currency]
         self._starting_capital = starting_capital + self._unallocated_capital
 
-    def sync_prices(self, tick: list) -> None:
+    def sync(self, tick: list = None, amounts: dict = None) -> None:
+
+        # Prices should be set before amounts
+        if tick is not None:
+            self._sync_prices(tick)
+
+        if amounts is not None:
+            self._sync_amounts(amounts)
+
+    def _sync_prices(self, tick: list) -> None:
 
         for t in tick:
 
@@ -301,12 +308,13 @@ class Portfolio:
 
             symbol.sync_state(tick_timestamp=timestamp, price=price)
 
-    def sync_amounts(self, symbol_amounts: dict) -> None:
+    def _sync_amounts(self, symbol_amounts: dict) -> None:
 
         for symbol_name, amount in symbol_amounts.items():
 
-            if symbol_name != self._reference_currency:
-
+            if symbol_name == self._reference_currency:
+                self._unallocated_capital = amount
+            else:
                 if symbol_name not in self.symbols:
                     self.symbols[symbol_name] = Symbol(symbol_name)
 
@@ -321,7 +329,7 @@ class Portfolio:
             if t["trading_pair"] == trading_pair:
                 return t[price_type], t["timestamp"]
 
-    def settle_order(self, settlement: Settlement) -> dict:
+    def settle_order(self, settlement: Settlement) -> Order:
 
         """Adds a settlement to an order and updates asset volumes and value at buy when the
         order has been filled. Uses the order_id to id the corresponding order in the orders df
@@ -415,7 +423,7 @@ if __name__ == "__main__":
     s.sync_state(tick_timestamp="2020...", price=Decimal("1"))
     print(s)
 
-    pf = Portfolio(starting_capital=Decimal(10000))
+    pf = Portfolio(backtest_starting_capital=Decimal(10000))
 
     for i in range(50):
 
@@ -464,7 +472,7 @@ if __name__ == "__main__":
                 fee=Decimal(0),
                 timestamp=timestamp_to_string(pd.Timestamp.now()),
                 cost=Decimal(prices[order.trading_pair]) * order.amount,
-                value=Decimal(prices[order.trading_pair]) * order.amount
+                value=Decimal(prices[order.trading_pair]) * order.amount,
             )
             pf.settle_order(settlement)
 

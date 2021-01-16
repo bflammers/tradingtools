@@ -9,15 +9,15 @@ import json
 
 try:
     from .data import HistoricalOHLCLoader
-    from .strategy import Strategy, MovingAverageCrossOverOHLC
+    from .strategy import Strategy
     from .portfolio import Portfolio
-    from .broker import Broker, Order, Settlement
+    from .broker import Broker, Order
     from .utils import CSVWriter
 except:
     from data import HistoricalOHLCLoader
-    from strategy import Strategy, MovingAverageCrossOverOHLC
+    from strategy import Strategy
     from portfolio import Portfolio
-    from broker import Broker, Order, Settlement
+    from broker import Broker, Order
     from utils import CSVWriter
 
 
@@ -49,7 +49,7 @@ class Pipeline:
 
         # Sync with exchange
         if sync_exchange:
-            self._sync_exchange(initialize=True)
+            self._sync_portfolio(initialize=True)
 
         # Create directory for results
         now = pd.Timestamp.now().strftime("%Y%m%d_%H%M")
@@ -97,20 +97,24 @@ class Pipeline:
     def _initialize_ticker(self) -> None:
         self.ticker = self.dataloader.get_ticker()
 
-    def sync_exchange(self, threaded: bool = False) -> None:
+    def sync_portfolio(self, threaded: bool = False) -> None:
 
         if threaded:
-            job_thread = threading.Thread(target=self._sync_exchange)
+            job_thread = threading.Thread(target=self._sync_portfolio)
             job_thread.start()
         else:
-            self._sync_exchange()
+            self._sync_portfolio()
 
-    def _sync_exchange(self, initialize: bool = False) -> None:
+    def _sync_portfolio(self, initialize: bool = False) -> None:
 
         # Sync with exchange
         symbol_amounts = self.broker.get_symbol_amounts()
-        tick = self.dataloader.get_single_tick()
-        self.portfolio.initialize(symbol_amounts, tick)
+
+        if initialize:
+            tick = self.dataloader.get_single_tick()
+            self.portfolio.initialize(amounts=symbol_amounts, tick=tick)
+        else:
+            self.portfolio.sync(amounts=symbol_amounts)
 
     def run(self) -> None:
 
@@ -226,7 +230,7 @@ if __name__ == "__main__":
         strat = MovingAverageCrossOverOHLC(
             trading_pair="BTC/EUR", trading_amount=0.1, metrics=["low", "close"]
         )
-        pf = Portfolio(Decimal(5000))
+        pf = Portfolio()
 
         with open("./secrets.json", "r") as in_file:
             secrets = json.load(in_file)["binance"]

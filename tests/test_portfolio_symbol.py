@@ -1,7 +1,8 @@
 import pytest
 from decimal import Decimal
 
-from tradingtools.symbol import Symbol
+from tradingtools.broker import Settlement
+from tradingtools.portfolio import Symbol
 
 
 def test_sync_state():
@@ -49,20 +50,22 @@ def test_update_optimal_positions():
 
     s = Symbol("BTC")
 
-    # First need to set price through sync_state
-    with pytest.raises(Exception):
-        order = s.update_optimal_position(amount1)
+    # # First need to set price through sync_state
+    # with pytest.raises(Exception):
+    #     order = s.update_optimal_position(amount1)
 
     s.sync_state(tick_timestamp=ts, price=price1)
 
     order = s.update_optimal_position(amount1)
 
     # Check order
-    assert {"order_id", "trading_pair", "side", "amount"}.issubset(set(order.keys()))
+    assert {"order_id", "trading_pair", "side", "amount"}.issubset(
+        set(order.__dict__.keys())
+    )
 
-    assert order["side"] == "buy"
-    assert order["amount"] == amount1
-    assert order["price_execution"] == price1
+    assert order.side == "buy"
+    assert order.amount == amount1
+    assert order.price_execution == price1
 
     # Check position
     assert s.optimal_amount == amount1
@@ -70,10 +73,10 @@ def test_update_optimal_positions():
     order = s.update_optimal_position(amount2)
 
     # Check order
-    assert isinstance(order["order_id"], str)
-    assert order["side"] == "buy"
-    assert order["amount"] == abs(amount1 - amount2)
-    assert order["price_execution"] == price1
+    assert isinstance(order.order_id, str)
+    assert order.side == "buy"
+    assert order.amount == abs(amount1 - amount2)
+    assert order.price_execution == price1
 
     # Check position
     assert s.optimal_amount == amount2
@@ -100,7 +103,14 @@ def test_add_settlement():
     assert s.get_current_value() == Decimal(0)
     assert s._pending_delta_amount == amount1
 
-    s.settle_order(order_id=order["order_id"], order_value=order_value1)
+    settlement = Settlement(
+        order_id=order.order_id,
+        status="pending",
+        trading_pair="BTC/EUR",
+        value=order_value1,
+    )
+
+    s.settle_and_retrieve_order(settlement=settlement)
 
     assert s._current_amount == amount1
     assert s.get_current_value() == amount1 * price1
@@ -122,7 +132,15 @@ def test_profit_and_loss():
 
     s.sync_state(tick_timestamp=ts, price=price1)
     order = s.update_optimal_position(amount1)
-    s.settle_order(order_id=order["order_id"], order_value=order_value1)
+
+    settlement = Settlement(
+        order_id=order.order_id,
+        status="completed",
+        trading_pair=order.trading_pair,
+        value=order_value1
+    )
+
+    s.settle_and_retrieve_order(settlement=settlement)
 
     pnl = s.profit_and_loss()
 
@@ -132,7 +150,15 @@ def test_profit_and_loss():
 
     s.sync_state(tick_timestamp=ts, price=price2)
     order = s.update_optimal_position(amount2)
-    s.settle_order(order_id=order["order_id"], order_value=order_value2)
+
+    settlement = Settlement(
+        order_id=order.order_id,
+        status="completed",
+        trading_pair=order.trading_pair,
+        value=order_value2
+    )
+
+    s.settle_and_retrieve_order(settlement=settlement)
 
     pnl = s.profit_and_loss()
 
