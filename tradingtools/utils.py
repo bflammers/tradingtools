@@ -1,9 +1,10 @@
 from decimal import Decimal
 import pandas as pd
 import warnings
-import threading
 import csv
+import threading
 
+from queue import Queue
 from uuid import uuid4
 from pathlib import Path
 
@@ -111,6 +112,7 @@ class CSVWriter:
         self.path = path
         self.columns = columns
         self._create_csv(self.path, self.columns)
+        self._worker_stop_event = None
 
     @staticmethod
     def _create_csv(path: str, columns: list) -> None:
@@ -162,4 +164,28 @@ class CSVWriter:
     def read(self) -> pd.DataFrame:
         df = pd.read_csv(self.path)
         return df
+
+    def _worker(self, q: Queue, stop_event: threading.Event) -> None:
+        while not stop_event.is_set():
+            row_dict = q.get()
+            self.append(row_dict)
+            q.task_done()
+        
+        print("Worker closed")
+
+    def start_worker(self, q: Queue):
+        self._worker_stop_event = threading.Event()
+        thr = threading.Thread(target=self._worker, args=(q, self._worker_stop_event))
+        thr.daemon = True
+        thr.start()
+    
+    def __del__(self):
+        self._worker_stop_event.set()
+        print("[CSVWriter] worker deamon thread closed")
+
+    def __exit__(self):
+        self._worker_stop_event.set()
+        print("[CSVWriter] exit -- worker deamon thread closed")
+
+    
 

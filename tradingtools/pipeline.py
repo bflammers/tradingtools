@@ -8,13 +8,13 @@ import threading
 import json
 
 try:
-    from .data import HistoricalOHLCLoader
+    from .dataloading import HistoricalOHLCLoader
     from .strategy import Strategy
     from .portfolio import Portfolio
     from .broker import Broker, Order
     from .utils import CSVWriter
 except:
-    from data import HistoricalOHLCLoader
+    from dataloading import HistoricalOHLCLoader
     from strategy import Strategy
     from portfolio import Portfolio
     from broker import Broker, Order
