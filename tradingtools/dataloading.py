@@ -194,19 +194,7 @@ class HistoricalOHLCLoader(DataLoader):
         return f"[Dataloader] >> processing row {self._i}/{self.n} >> {row.name}"
 
 
-class CombinationLoader(DataLoader):
-    def __init__(self, trading_pair: str) -> None:
-        super().__init__(trading_pair)
-        self.dataloaders = dict()
-        raise NotImplementedError
 
-    def add_dataloader(self, key: str, dataloader: DataLoader) -> None:
-        self.dataloaders[key] = dataloader
-
-    @threadsafe_generator
-    def get_ticker(self) -> Generator:
-        """Generator that provides an iterator over all dataloaders"""
-        raise NotImplementedError()
 
 
 if __name__ == "__main__":
