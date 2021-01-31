@@ -6,9 +6,6 @@ import pandas as pd
 from uuid import uuid4
 from pathlib import Path
 from time import sleep
-from urllib3.util.retry import Retry
-from requests.adapters import HTTPAdapter
-from requests import Session
 from typing import Callable, Dict
 
 try:
@@ -83,22 +80,6 @@ def make_trade_callback(fn: Callable[[Dict], None]) -> Callable:
         )
 
     return trade_callback
-
-
-class HTTPLoader:
-    url: str
-    session: Session = Session()
-
-    def __init__(self, url, total_retries: int = 5, backoff_factor: int = 2) -> None:
-
-        self.url = url
-        retries = Retry(total=total_retries, backoff_factor=backoff_factor)
-        self.session.mount("http://", HTTPAdapter(max_retries=retries))
-        self.session.mount("https://", HTTPAdapter(max_retries=retries))
-
-    def make_request(self):
-        response = self.session.get(self.url)
-        return response.json()
 
 
 def threadsafe_generator(f):
@@ -200,13 +181,8 @@ if __name__ == "__main__":
 
     import numpy as np
 
-    api = HTTPLoader(url="https://api.senticrypt.com/v1/bitcoin.json")
-    # x = api.make_request()
-    # print(json.dumps(x, indent=4))
-
     stream = ThreadStream()
 
-    producer = api.make_request
     producer = lambda: {"a": np.random.randn()}
     consumer = lambda x: print(x, flush=True)
 

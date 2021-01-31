@@ -1,6 +1,7 @@
 from typing import Callable
-from uuid import uuid4
-from pathlib import Path
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
+from requests import Session
 
 import pandas as pd
 
@@ -116,10 +117,48 @@ class OptionsDataFeed(DataFeed):
         self.current_instruments |= new_instruments
 
 
+class HTTPFeed:
+    url: str
+    session: Session = Session()
+
+    def __init__(self, url, total_retries: int = 5, backoff_factor: int = 2) -> None:
+
+        self.url = url
+        retries = Retry(total=total_retries, backoff_factor=backoff_factor)
+        self.session.mount("http://", HTTPAdapter(max_retries=retries))
+        self.session.mount("https://", HTTPAdapter(max_retries=retries))
+
+    def make_request(self):
+        response = self.session.get(self.url)
+        return response.json()
+
+
 if __name__ == "__main__":
 
+    from time import sleep
+
+    api = HTTPFeed(url="https://api.senticrypt.com/v1/bitcoin.json")
+    # x = api.make_request()
+    # print(json.dumps(x, indent=4))
+
+    stream = ThreadStream()
+
+    producer = api.make_request
+    consumer = lambda x: print(x, flush=True)
+
+    stream.add_producer(producer, interval_time=0.1)
+    stream.add_consumer(consumer, interval_time=0.5, batched=True)
+
+    # TODO: batch not yet working!!!
+
+    for i in range(100):
+        # print(len(stream.get_latest()))
+        sleep(0.1)
+
+    exit()
+
     print("Initializing new OptionsCollectionFeed")
-    ocf = OptionsDataFeed(exchange=Deribit, parent_dir="./data/collected/Deribit")
+    ocf = OptionsDataFeed(exchange=Deribit)
 
     ticks_handler = ThreadStream()
     ticks_handler.add_consumer(
@@ -136,5 +175,5 @@ if __name__ == "__main__":
     print("Syncing instruments")
     ocf.sync_instruments()
 
-    print(f"Running.... writing ticks and trades to {ocf._results_dir}")
+    print(f"Running....")
     ocf.run()
