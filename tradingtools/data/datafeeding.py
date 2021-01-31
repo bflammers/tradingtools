@@ -1,7 +1,6 @@
+from typing import Callable
 from uuid import uuid4
 from pathlib import Path
-from threading import Thread
-from queue import Queue
 
 import pandas as pd
 
@@ -12,19 +11,24 @@ from cryptofeed.exchanges import Deribit
 from cryptofeed.feed import Feed
 
 try:
-    from ..datahandling import BatchedTickHandler
-except:
-    from tradingtools.datahandling import BatchedTickHandler
+    from .datahandling import ThreadStream
+    from .datautils import make_ticker_callback, make_trade_callback
+except ImportError:
+    from tradingtools.data.datahandling import ThreadStream
+    from tradingtools.data.datautils import make_ticker_callback, make_trade_callback
 
 
-class CollectionFeed:
+class DataFeed:
     fh: FeedHandler
     exchange: Feed
     running: bool
+    ticker_callback: Callable
+    trades_callback: Callable
+    _consumers_running: bool = False
 
     def __init__(
         self,
-        exchange
+        exchange,
     ) -> None:
         super().__init__()
         self.exchange = exchange
@@ -32,39 +36,27 @@ class CollectionFeed:
         self.running = False
         self.current_instruments = set()
 
-        self.tick_handler = BatchedTickHandler(lambda x: print(f"Tick: {len(x)}"), 1)
-        self.trade_handler = BatchedTickHandler(lambda x: print(f"Trade: {len(x)}"), 1)
+    def add_consumers(
+        self, ticks_consumer: ThreadStream, trades_consumer: ThreadStream
+    ) -> None:
 
-    async def ticker_callback(self, feed, pair, bid, ask, timestamp, receipt_timestamp):
-        # print(f"Ticker q len: {self.ticker_q.qsize()}")
-        self.tick_handler.process(
-            {
-                "feed": feed,
-                "timestamp": timestamp,
-                "receipt_timestamp": receipt_timestamp,
-                "pair": pair,
-                "bid": bid,
-                "ask": ask,
-            }
-        )
+        self.ticker_callback = make_ticker_callback(ticks_consumer.add_to_q)
+        self.trades_callback = make_trade_callback(trades_consumer.add_to_q)
+        self._consumers_running = True
 
-    async def trade_callback(
-        self, feed, pair, order_id, timestamp, side, amount, price, receipt_timestamp
-    ):
-        # print(f"Trade q len: {self.trade_q.qsize()}")
-        self.trade_handler.process(
-            {
-                "feed": feed,
-                "timestamp": timestamp,
-                "receipt_timestamp": receipt_timestamp,
-                "pair": pair,
-                "order_id": order_id,
-                "side": side,
-                "amount": amount,
-                "price": price,
-            }
-        )
+    def add_instruments(self):
+        raise NotImplementedError
 
+    def run(self):
+
+        if not self._consumers_running:
+            Exception("[DataFeed] consumers not started, call first")
+
+        self.fh.run()
+        self.running = True
+
+
+class OptionsDataFeed(DataFeed):
     def sync_instruments(
         self, base_symbol: str = None, max_expiration_days: int = None
     ):
@@ -115,7 +107,7 @@ class CollectionFeed:
                 config=config,
                 callbacks={
                     TICKER: TickerCallback(self.ticker_callback),
-                    TRADES: TradeCallback(self.trade_callback),
+                    TRADES: TradeCallback(self.trades_callback),
                 },
             )
         )
@@ -123,19 +115,26 @@ class CollectionFeed:
         # Update current instruments
         self.current_instruments |= new_instruments
 
-    def run(self):
-        self.fh.run()
-        self.running = True
-
 
 if __name__ == "__main__":
 
     print("Initializing new OptionsCollectionFeed")
-    ocf = CollectionFeed(exchange=Deribit)
-    
-    print("Syncing instruments")
-    # ocf.sync_instruments()
-    ocf.add_instruments(['ETH-PERPETUAL'])
+    ocf = OptionsDataFeed(exchange=Deribit, parent_dir="./data/collected/Deribit")
 
-    print(f"Running.... ")
+    ticks_handler = ThreadStream()
+    ticks_handler.add_consumer(
+        lambda x: print('Ticks: ', len(x), flush=True), interval_time=1, batched=True
+    )
+
+    trades_handler = ThreadStream()
+    trades_handler.add_consumer(
+        lambda x: print('Trades: ', len(x), flush=True), interval_time=1, batched=True
+    )
+
+    ocf.add_consumers(ticks_consumer=ticks_handler, trades_consumer=trades_handler)
+
+    print("Syncing instruments")
+    ocf.sync_instruments()
+
+    print(f"Running.... writing ticks and trades to {ocf._results_dir}")
     ocf.run()

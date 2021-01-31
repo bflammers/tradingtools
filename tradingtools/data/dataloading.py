@@ -1,5 +1,6 @@
 import os
 import re
+import requests
 
 from pathlib import Path
 from typing import Generator
@@ -11,17 +12,16 @@ import pandas as pd
 import numpy as np
 
 try:
-    from .utils import timestamp_to_string, threadsafe_generator
+    from ..utils import timestamp_to_string, threadsafe_generator
 except:
-    from utils import timestamp_to_string, threadsafe_generator
+    from tradingtools.utils import timestamp_to_string, threadsafe_generator
 
 
 class DataLoader:
-    def __init__(self, trading_pair: str, verbose: bool = False) -> None:
+    def __init__(self, verbose: bool = False) -> None:
         super().__init__()
 
         self.df = None
-        self.trading_pair = trading_pair
         self._verbose = verbose
         self._i = 0
 
@@ -44,7 +44,7 @@ class OHLCLoader(DataLoader):
     def __init__(
         self, trading_pair: str, exchange: str = "binance", verbose: bool = True
     ) -> None:
-        super().__init__(trading_pair, verbose=verbose)
+        super().__init__(verbose=verbose)
         self.trading_pair = trading_pair
         self.exchange_name = exchange
         self._tick_keys = ["timestamp", "open", "high", "low", "close", "volume"]
@@ -192,9 +192,6 @@ class HistoricalOHLCLoader(DataLoader):
     def __str__(self) -> str:
         row = self.df.iloc[self._i]
         return f"[Dataloader] >> processing row {self._i}/{self.n} >> {row.name}"
-
-
-
 
 
 if __name__ == "__main__":
