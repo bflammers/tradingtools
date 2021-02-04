@@ -37,7 +37,7 @@ trades_columns = [
     "receipt_timestamp",
 ]
 
-nbbo_columns = ["symbol", "bid", "bid_size", "ask", "ask_size", "bid_feed", "ask_feed"]
+nbbo_columns = ["symbol", "bid", "bid_size", "ask", "ask_size", "bid_feed", "ask_feed",]
 
 # Create directory for results
 def create_results_dir(parent_dir: Path):

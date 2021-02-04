@@ -20,6 +20,7 @@ except:
         nbbo_columns,
     )
 
+nbbo_columns = ["symbol", "bid", "bid_size", "ask", "ask_size", "bid_feed", "ask_feed",]
 
 def deribit_collect_ticks_trades(results_dir_path: Path = "./data/collected/Deribit"):
 
