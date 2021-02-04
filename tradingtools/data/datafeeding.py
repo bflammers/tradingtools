@@ -1,4 +1,5 @@
-from typing import Callable
+from typing import Callable, List
+from tradingtools.data.datautils import make_nbbo_callback
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 from requests import Session
@@ -8,7 +9,7 @@ import pandas as pd
 from cryptofeed import FeedHandler
 from cryptofeed.callback import TickerCallback, TradeCallback
 from cryptofeed.defines import TICKER, TRADES
-from cryptofeed.exchanges import Deribit
+from cryptofeed.exchanges import Deribit, Bitstamp, Coinbase, Gemini, Kraken
 from cryptofeed.feed import Feed
 
 try:
@@ -16,7 +17,11 @@ try:
     from .datautils import make_ticker_callback, make_trade_callback
 except ImportError:
     from tradingtools.data.datahandling import ThreadStream
-    from tradingtools.data.datautils import make_ticker_callback, make_trade_callback
+    from tradingtools.data.datautils import (
+        make_ticker_callback,
+        make_trade_callback,
+        make_nbbo_callback,
+    )
 
 
 class DataFeed:
@@ -38,15 +43,23 @@ class DataFeed:
         self.current_instruments = set()
 
     def add_consumers(
-        self, ticks_consumer: ThreadStream, trades_consumer: ThreadStream
+        self,
+        ticks_consumer: ThreadStream,
+        trades_consumer: ThreadStream,
+        nbbo_consumer: ThreadStream,
     ) -> None:
 
         self.ticker_callback = make_ticker_callback(ticks_consumer.add_to_q)
         self.trades_callback = make_trade_callback(trades_consumer.add_to_q)
+        self.nbbo_callback = make_nbbo_callback(nbbo_consumer.add_to_q)
         self._consumers_running = True
 
     def add_instruments(self):
         raise NotImplementedError
+
+    def add_nbbo(self, exchanges: list, instruments: list) -> None:
+
+        self.fh.add_nbbo(exchanges, instruments, self.nbbo_callback)
 
     def run(self):
 
@@ -95,6 +108,13 @@ class OptionsDataFeed(DataFeed):
 
         # Add the instruments to the feed
         self.add_instruments(instruments)
+
+    def add_nbbo(
+        self,
+        exchanges: List = [Bitstamp, Coinbase, Gemini, Kraken],
+        instruments: List = ["BTC-USD", "ETH-USD"],
+    ) -> None:
+        super().add_nbbo(exchanges, instruments)
 
     def add_instruments(self, instruments: list):
 
@@ -162,12 +182,12 @@ if __name__ == "__main__":
 
     ticks_handler = ThreadStream()
     ticks_handler.add_consumer(
-        lambda x: print('Ticks: ', len(x), flush=True), interval_time=1, batched=True
+        lambda x: print("Ticks: ", len(x), flush=True), interval_time=1, batched=True
     )
 
     trades_handler = ThreadStream()
     trades_handler.add_consumer(
-        lambda x: print('Trades: ', len(x), flush=True), interval_time=1, batched=True
+        lambda x: print("Trades: ", len(x), flush=True), interval_time=1, batched=True
     )
 
     ocf.add_consumers(ticks_consumer=ticks_handler, trades_consumer=trades_handler)

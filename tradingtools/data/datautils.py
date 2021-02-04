@@ -37,9 +37,11 @@ trades_columns = [
     "receipt_timestamp",
 ]
 
+nbbo_columns = ["symbol", "bid", "bid_size", "ask", "ask_size", "bid_feed", "ask_feed"]
+
 # Create directory for results
 def create_results_dir(parent_dir: Path):
-    now = pd.Timestamp.now().strftime("%F_%T")
+    now = pd.Timestamp.now().strftime("%F_%H%M%S")
     ts_uuid = f"{now}_{uuid4().hex}"
     results_dir = (Path(parent_dir) / ts_uuid).absolute()
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -80,6 +82,23 @@ def make_trade_callback(fn: Callable[[Dict], None]) -> Callable:
         )
 
     return trade_callback
+
+
+def make_nbbo_callback(fn: Callable[[Dict], None]) -> Callable:
+    async def nbbo_callback(symbol, bid, bid_size, ask, ask_size, bid_feed, ask_feed):
+        fn(
+            {
+                "symbol": symbol,
+                "bid": bid,
+                "bid_size": bid_size,
+                "ask": ask,
+                "ask_size": ask_size,
+                "bid_feed": bid_feed,
+                "ask_feed": ask_feed,
+            }
+        )
+
+    return nbbo_callback
 
 
 def threadsafe_generator(f):
