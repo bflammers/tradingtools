@@ -9,7 +9,13 @@ from cryptofeed.exchanges import Deribit
 
 try:
     from ..datafeeding import OptionsDataFeed
-    from ..datautils import CSVWriter, create_results_dir, trades_columns, ticks_columns
+    from ..datautils import (
+        CSVWriter,
+        create_results_dir,
+        trades_columns,
+        ticks_columns,
+        nbbo_columns,
+    )
 except:
     from tradingtools.data.datafeeding import OptionsDataFeed
     from tradingtools.data.datautils import (
@@ -20,7 +26,6 @@ except:
         nbbo_columns,
     )
 
-nbbo_columns = ["symbol", "bid", "bid_size", "ask", "ask_size", "bid_feed", "ask_feed",]
 
 def deribit_collect_ticks_trades(results_dir_path: Path = "./data/collected/Deribit"):
 
