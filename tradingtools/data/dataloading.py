@@ -12,9 +12,9 @@ import pandas as pd
 import numpy as np
 
 try:
-    from ..utils import timestamp_to_string, threadsafe_generator
-except:
-    from tradingtools.utils import timestamp_to_string, threadsafe_generator
+    from .datautils import timestamp_to_string, threadsafe_generator
+except ImportError:
+    from tradingtools.data.datautils import timestamp_to_string, threadsafe_generator
 
 
 class DataLoader:
@@ -107,8 +107,8 @@ class HistoricalOHLCLoader(DataLoader):
         extra_pattern: str = None,
         verbose: bool = False,
     ) -> None:
-        super().__init__(trading_pair, verbose)
-
+        super().__init__(verbose)
+        self.trading_pair = trading_pair
         self._load_price_data(path, extra_pattern)
 
         self._i = 0
@@ -208,8 +208,14 @@ if __name__ == "__main__":
 
     # exit()
 
-    p = "./data/cryptodatadownload/binance/price"
+    dl = HistoricalOHLCLoader('BTCUSD', 
+                          path="/Volumes/Bart_500GB/cryptodata/cryptodatadownload/gemini/price/", 
+                          extra_pattern="2020")
 
+    
+    exit()
+
+    p = "./data/cryptodatadownload/binance/price"
     dl = HistoricalOHLCLoader("BTCUSD", p, "dev")
     dl.df.head()
 
