@@ -44,21 +44,38 @@ class DataFeed:
 
     def add_consumers(
         self,
-        ticks_consumer: ThreadStream,
-        trades_consumer: ThreadStream,
-        nbbo_consumer: ThreadStream,
+        ticks_consumer: ThreadStream = None,
+        trades_consumer: ThreadStream = None,
+        nbbo_consumer: ThreadStream = None,
     ) -> None:
 
-        self.ticker_callback = make_ticker_callback(ticks_consumer.add_to_q)
-        self.trades_callback = make_trade_callback(trades_consumer.add_to_q)
-        self.nbbo_callback = make_nbbo_callback(nbbo_consumer.add_to_q)
+        if ticks_consumer:
+            self.ticker_callback = make_ticker_callback(ticks_consumer.add_to_q)
+
+        if trades_consumer:
+            self.trades_callback = make_trade_callback(trades_consumer.add_to_q)
+        
+        if nbbo_consumer:
+            self.nbbo_callback = make_nbbo_callback(nbbo_consumer.add_to_q)
+    
         self._consumers_running = True
 
-    def add_instruments(self):
-        raise NotImplementedError
+    def add_instruments(self, pairs: list):
+
+        # Add instruments to feed
+        config = {TRADES: pairs, TICKER: pairs}
+        self.fh.add_feed(
+            self.exchange(
+                config=config,
+                callbacks={
+                    TICKER: TickerCallback(self.ticker_callback),
+                    TRADES: TradeCallback(self.trades_callback),
+                },
+            )
+        )
 
     def add_nbbo(self, exchanges: list, instruments: list) -> None:
-
+    
         self.fh.add_nbbo(exchanges, instruments, self.nbbo_callback)
 
     def run(self):
@@ -115,6 +132,7 @@ class OptionsDataFeed(DataFeed):
         instruments: List = ["BTC-USD", "ETH-USD"],
     ) -> None:
         super().add_nbbo(exchanges, instruments)
+
 
     def add_instruments(self, instruments: list):
 

@@ -5,7 +5,7 @@ import pandas as pd
 
 from uuid import uuid4
 from pathlib import Path
-from time import sleep
+from time import sleep, time
 from typing import Callable, Dict
 
 try:
@@ -24,6 +24,7 @@ ticks_columns = [
     "pair",
     "bid",
     "ask",
+    "write_time"
 ]
 
 trades_columns = [
@@ -35,9 +36,10 @@ trades_columns = [
     "amount",
     "price",
     "receipt_timestamp",
+    "write_time"
 ]
 
-nbbo_columns = ["symbol", "bid", "bid_size", "ask", "ask_size", "bid_feed", "ask_feed",]
+nbbo_columns = ["symbol", "bid", "bid_size", "ask", "ask_size", "bid_feed", "ask_feed", "write_time"]
 
 # Create directory for results
 def create_results_dir(parent_dir: Path):
@@ -50,6 +52,7 @@ def create_results_dir(parent_dir: Path):
 
 def make_ticker_callback(fn: Callable[[Dict], None]) -> Callable:
     async def ticker_callback(feed, pair, bid, ask, timestamp, receipt_timestamp):
+        write_time = time()
         fn(
             {
                 "feed": feed,
@@ -58,6 +61,7 @@ def make_ticker_callback(fn: Callable[[Dict], None]) -> Callable:
                 "pair": pair,
                 "bid": bid,
                 "ask": ask,
+                "write_time": write_time,
             }
         )
 
@@ -68,6 +72,7 @@ def make_trade_callback(fn: Callable[[Dict], None]) -> Callable:
     async def trade_callback(
         feed, pair, order_id, timestamp, side, amount, price, receipt_timestamp
     ):
+        write_time = time()
         fn(
             {
                 "feed": feed,
@@ -78,6 +83,7 @@ def make_trade_callback(fn: Callable[[Dict], None]) -> Callable:
                 "side": side,
                 "amount": amount,
                 "price": price,
+                "write_time": write_time,
             }
         )
 
@@ -86,6 +92,7 @@ def make_trade_callback(fn: Callable[[Dict], None]) -> Callable:
 
 def make_nbbo_callback(fn: Callable[[Dict], None]) -> Callable:
     async def nbbo_callback(symbol, bid, bid_size, ask, ask_size, bid_feed, ask_feed):
+        write_time = time()
         fn(
             {
                 "symbol": symbol,
@@ -95,6 +102,7 @@ def make_nbbo_callback(fn: Callable[[Dict], None]) -> Callable:
                 "ask_size": ask_size,
                 "bid_feed": bid_feed,
                 "ask_feed": ask_feed,
+                "write_time": write_time,
             }
         )
 

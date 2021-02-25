@@ -5,10 +5,10 @@ logger = logging.getLogger(__name__)
 import pandas as pd
 
 from pathlib import Path
-from cryptofeed.exchanges import Deribit
+from cryptofeed.exchanges import Binance, Bitstamp, Kraken, Coinbase, Gemini
 
 try:
-    from ..datafeeding import OptionsDataFeed
+    from ..datafeeding import DataFeed
     from ..datautils import (
         CSVWriter,
         create_results_dir,
@@ -17,7 +17,7 @@ try:
         nbbo_columns,
     )
 except:
-    from tradingtools.data.datafeeding import OptionsDataFeed
+    from tradingtools.data.datafeeding import DataFeed
     from tradingtools.data.datautils import (
         CSVWriter,
         create_results_dir,
@@ -27,10 +27,10 @@ except:
     )
 
 
-def deribit_collect_ticks_trades_nbbo(results_dir_path: Path = "./data/collected/Deribit"):
+def binance_collect_ticks_trades_nbbo(results_dir_path: Path = "./data/collected/binance"):
 
-    logger.info("Initializing new OptionsCollectionFeed")
-    ocf = OptionsDataFeed(exchange=Deribit)
+    logger.info("Initializing new Datafeed")
+    feed = DataFeed(exchange=Binance)
 
     logger.info("Creating results directory")
     results_dir = create_results_dir(results_dir_path)
@@ -46,23 +46,24 @@ def deribit_collect_ticks_trades_nbbo(results_dir_path: Path = "./data/collected
     nbbo_writer = CSVWriter(path=results_dir / f"{now}_nbbos.csv", columns=nbbo_columns)
 
     logger.info("Adding CSVWriters as consumers to DataFeed")
-    ocf.add_consumers(
+    feed.add_consumers(
         ticks_consumer=ticks_writer,
-        trades_consumer=trades_writer,
-        nbbo_consumer=nbbo_writer,
-    )
+        trades_consumer=trades_writer, 
+        nbbo_consumer=nbbo_writer)
 
-    logger.info("Syncing instruments")
-    ocf.sync_instruments()
+    logger.info("Add instruments")
+    feed.add_instruments(["BTC-USDT", "ETH-USDT"])
 
     logger.info("Adding nbbo")
-    ocf.add_nbbo()
+    feed.add_nbbo(
+        exchanges=[Bitstamp, Coinbase, Gemini, Kraken],
+        instruments=["BTC-USD", "ETH-USD"]
+    )
 
     logger.info(f"Running.... writing ticks and trades to {results_dir}")
-    ocf.run()
+    feed.run()
 
 
 if __name__ == "__main__":
 
-    parent_path = Path("/media/bart/Bart_500GB/cryptodata/collected/deribit")
-    deribit_collect_ticks_trades_nbbo(parent_path)
+    binance_collect_ticks_trades_nbbo()
