@@ -43,22 +43,22 @@ def binance_collect_ticks_trades_nbbo(results_dir_path: Path = "./data/collected
     trades_writer = CSVWriter(
         path=results_dir / f"{now}_trades.csv", columns=trades_columns
     )
-    nbbo_writer = CSVWriter(path=results_dir / f"{now}_nbbos.csv", columns=nbbo_columns)
+    # nbbo_writer = CSVWriter(path=results_dir / f"{now}_nbbos.csv", columns=nbbo_columns)
 
     logger.info("Adding CSVWriters as consumers to DataFeed")
     feed.add_consumers(
         ticks_consumer=ticks_writer,
         trades_consumer=trades_writer, 
-        nbbo_consumer=nbbo_writer)
+        nbbo_consumer=None)
 
     logger.info("Add instruments")
     feed.add_instruments(["BTC-USDT", "ETH-USDT"])
 
-    logger.info("Adding nbbo")
-    feed.add_nbbo(
-        exchanges=[Bitstamp, Coinbase, Gemini, Kraken],
-        instruments=["BTC-USD", "ETH-USD"]
-    )
+    # logger.info("Adding nbbo")
+    # feed.add_nbbo(
+    #     exchanges=[Bitstamp, Coinbase, Gemini, Kraken],
+    #     instruments=["BTC-USD", "ETH-USD"]
+    # )
 
     logger.info(f"Running.... writing ticks and trades to {results_dir}")
     feed.run()
