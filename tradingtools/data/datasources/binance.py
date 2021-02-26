@@ -1,4 +1,5 @@
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,11 @@ def binance_collect_ticks_trades_nbbo(results_dir_path: Path = "./data/collected
         nbbo_consumer=None)
 
     logger.info("Add instruments")
-    feed.add_instruments(["BTC-USDT", "ETH-USDT"])
+    binance_info = Binance.info()
+    all_pairs = binance_info["pairs"]
+    pairs = [pair for pair in all_pairs if re.findall("-USDT|-EUR|-USD", pair)]
+    logger.info(f"{len(pairs)} instruments added")
+    feed.add_instruments(pairs)
 
     # logger.info("Adding nbbo")
     # feed.add_nbbo(
