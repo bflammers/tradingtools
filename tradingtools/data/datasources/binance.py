@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 import pandas as pd
 
 from pathlib import Path
-from cryptofeed.exchanges import Binance, Bitstamp, Kraken, Coinbase, Gemini
+from cryptofeed.exchanges import Binance
 
 try:
     from ..datafeeding import DataFeed
@@ -14,8 +14,7 @@ try:
         CSVWriter,
         create_results_dir,
         trades_columns,
-        ticks_columns,
-        nbbo_columns,
+        ticks_columns
     )
 except:
     from tradingtools.data.datafeeding import DataFeed
@@ -23,12 +22,11 @@ except:
         CSVWriter,
         create_results_dir,
         trades_columns,
-        ticks_columns,
-        nbbo_columns,
+        ticks_columns
     )
 
 
-def binance_collect_ticks_trades_nbbo(results_dir_path: Path = "./data/collected/binance"):
+def binance_collect_ticks_trades(results_dir_path: Path = "./data/testing/"):
 
     logger.info("Initializing new Datafeed")
     feed = DataFeed(exchange=Binance)
@@ -44,7 +42,6 @@ def binance_collect_ticks_trades_nbbo(results_dir_path: Path = "./data/collected
     trades_writer = CSVWriter(
         path=results_dir / f"{now}_trades.csv", columns=trades_columns
     )
-    # nbbo_writer = CSVWriter(path=results_dir / f"{now}_nbbos.csv", columns=nbbo_columns)
 
     logger.info("Adding CSVWriters as consumers to DataFeed")
     feed.add_consumers(
@@ -54,16 +51,13 @@ def binance_collect_ticks_trades_nbbo(results_dir_path: Path = "./data/collected
 
     logger.info("Add instruments")
     binance_info = Binance.info()
-    all_pairs = binance_info["pairs"]
+    try:
+        all_pairs = binance_info["pairs"]
+    except KeyError:
+        all_pairs = binance_info["symbols"]
     pairs = [pair for pair in all_pairs if re.findall("-USDT|-EUR|-USD", pair)]
     logger.info(f"{len(pairs)} instruments added")
     feed.add_instruments(pairs)
-
-    # logger.info("Adding nbbo")
-    # feed.add_nbbo(
-    #     exchanges=[Bitstamp, Coinbase, Gemini, Kraken],
-    #     instruments=["BTC-USD", "ETH-USD"]
-    # )
 
     logger.info(f"Running.... writing ticks and trades to {results_dir}")
     feed.run()
@@ -71,4 +65,4 @@ def binance_collect_ticks_trades_nbbo(results_dir_path: Path = "./data/collected
 
 if __name__ == "__main__":
 
-    binance_collect_ticks_trades_nbbo()
+    binance_collect_ticks_trades()
