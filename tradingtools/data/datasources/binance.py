@@ -55,7 +55,7 @@ def binance_collect_ticks_trades(results_dir_path: Path = "./data/testing/"):
         all_pairs = binance_info["pairs"]
     except KeyError:
         all_pairs = binance_info["symbols"]
-    pairs = [pair for pair in all_pairs if re.findall("-USDT|-EUR|-USD", pair)]
+    pairs = [pair for pair in all_pairs if re.findall("-USDT|-EUR|-USD|-BNB", pair)]
     logger.info(f"{len(pairs)} instruments added")
     feed.add_instruments(pairs)
 
