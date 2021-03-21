@@ -47,34 +47,17 @@ def plot_price_profit(price, profit, from_idx=0, to_idx=None):
     ax2.set_ylabel('profit') 
     ax2.plot(y2, color="orange")
 
-def backtest(price, signals, cost_factor=0.001, starting_capital=None, verbose=True):
+def backtest(price, signals, cost_factor=0.001, verbose=True):
     
     buy, sell = signals == "buy", signals == "sell"
     
-    if starting_capital is None:
-        try:
-            starting_capital = price[buy][0]
-        except IndexError:
-            starting_capital = 0
-    
     exposed = False
-    unallocated = starting_capital
-    allocated = 0
-    
-    tv_at_buy = 0
-    tv_at_sell = 0
-    
-    tv_costs = 0
-    
     buy_price = 0
     profit = 0
-    
-    capital = np.zeros(len(price))
-    amount = np.zeros(len(price))
-    
-    capital[0] = starting_capital
-
     n_orders = 0
+    
+    profit_over_time = np.zeros(len(price))
+    exposed_over_time = np.zeros(len(price))
 
     if verbose: 
         iter_price = enumerate(tqdm(price))
@@ -85,40 +68,19 @@ def backtest(price, signals, cost_factor=0.001, starting_capital=None, verbose=T
 
         if buy[i] and not exposed:
             exposed = True
-            
             buy_price = p
-            
-            tv_at_buy += p
-            
-            unallocated -= p
-
-            tv_costs += cost_factor * p
-
             n_orders += 1
 
         if sell[i] and exposed:
             exposed = False
-            
-            profit += p - buy_price
-            
-            tv_at_sell += p
-            
-            unallocated += p
-
-            tv_costs += cost_factor * p
-
+            profit += p - buy_price - cost_factor * (buy_price + p)
             n_orders += 1
 
-        allocated = exposed * p
-
-        capital[i] = allocated + unallocated - tv_costs
-        amount[i] = int(exposed)
+        profit_over_time[i] = profit
+        exposed_over_time[i] = int(exposed)
     
     if verbose:
-        print(f"Total profit: {unallocated + allocated - starting_capital - tv_costs}")
-        print(f"Total profit: {profit - tv_costs}")
-        print(f"Total profit: {tv_at_sell - tv_at_buy - tv_costs + exposed * p}")
+        print(f"Total profit: {profit}")
         print(f"Number of orders: {n_orders}")
     
-    
-    return capital - starting_capital, amount
+    return profit_over_time, exposed_over_time, n_orders
