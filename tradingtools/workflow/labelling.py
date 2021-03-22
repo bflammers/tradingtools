@@ -8,14 +8,14 @@ from .analysis import backtest
 def judge_buy(
     history,
     ahead,
-    b_irr=0.0015,
-    b_n_irr=60,
-    b_p_irr=0.1,
-    b_nrr=0.0005,
-    b_n_nrr=30,
-    b_p_nrr=0.01,
+    b_irr=0.002,
+    b_n_irr=120,
+    b_p_irr=0.65, 
+    b_nrr=6e-03, 
+    b_n_nrr=35,
+    b_p_nrr=0.55,
     b_incr_nh=2,
-    b_incr_na=2,
+    b_incr_na=5,
 ):
 
     current, history = history[:, -1], history[:, :-1]
@@ -42,14 +42,14 @@ def judge_buy(
 def judge_sell(
     history,
     ahead,
-    s_irr=0.0001,
-    s_n_irr=30,
-    s_p_irr=0.2,
-    s_prr=0.0005,
-    s_n_prr=60,
-    s_p_prr=0.2,
+    s_irr=0.004,
+    s_n_irr=120,
+    s_p_irr=6e-2, 
+    s_prr=1e-5,
+    s_n_prr=33, 
+    s_p_prr=0.55,
     s_decr_nh=2,
-    s_decr_na=2,
+    s_decr_na=2
 ):
 
     current, history = history[:, -1], history[:, :-1]
