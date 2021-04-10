@@ -9,43 +9,80 @@ from pathlib import Path
 from tqdm.notebook import tqdm_notebook as tqdm
 
 
-def _load_ticks(dir_name, pairs):
+#### Dataloading
 
+
+def _load_and_add_to_dict(dir_name, pairs, dfs_dict):
+
+    # Construct path
     binance_path = Path.cwd().parent / "data/collected/binance"
     data_path = binance_path / dir_name
     ticks_path = [p for p in list(data_path.glob("*")) if re.findall("ticks", str(p))][
         0
     ]
 
+    # Read data
     df = pd.read_csv(ticks_path)
     print(f"{dir_name[:25]} - Total data shape: ", df.shape)
 
+    # Filter pairs
     df = df[df.pair.isin(pairs)]
     print(f"{dir_name[:25]} - Pairs data shape: ", df.shape)
 
-    df = df.sort_values("write_time")
-    df["write_timestamp"] = pd.to_datetime(df.write_time, unit="s")
-    df["time_diff"] = df.write_timestamp.diff().dt.total_seconds()
-
-    df = df.reset_index(drop=True)
-    df = df.set_index("write_timestamp", drop=False)
-
-    df["spread"] = (df.bid - df.ask).abs()
-
+    # Add which collection run this data was collected in, for removing overlap later
     df["collection_run"] = dir_name
 
-    return df
+    # Add to dict
+    dfs_dict[dir_name] = df
 
 
-def _load_and_add_to_dict(dir_name, pairs, dfs_dict):
+def load_train_val_test(train_dirs, val_dirs=None, test_dirs=None, n_pool=11):
 
-    dfs_dict[dir_name] = _load_ticks(dir_name, pairs)
+    all_dirs = train_dirs
+
+    if val_dirs:
+        all_dirs += val_dirs
+
+    if test_dirs:
+        all_dirs += test_dirs
+
+    with multiprocessing.Manager() as manager:
+
+        dfs = manager.dict()
+
+        n_dirs = len(all_dirs)
+        with multiprocessing.Pool(processes=min(n_dirs, n_pool)) as pool:
+
+            args = zip(all_dirs, [["ETH-USDT"]] * n_dirs, [dfs] * n_dirs)
+            pool.starmap(_load_and_add_to_dict, args)
+
+        # Train data
+        dfs_train = [df for name, df in dfs.items() if name in train_dirs]
+        df_train = pd.concat(dfs_train)
+        result = (df_train,)
+
+        # Validation data
+        if val_dirs:
+            dfs_val = [df for name, df in dfs.items() if name in val_dirs]
+            df_val = pd.concat(dfs_val)
+            result += (df_val,)
+
+        # Test data
+        if test_dirs:
+            dfs_test = [df for name, df in dfs.items() if name in test_dirs]
+            df_test = pd.concat(dfs_test)
+            result += (df_test,)
+
+    return result
 
 
-def drop_overlapping(df, print_prefix=""):
+#### Post-loading processing
 
-    min_times = df.groupby("collection_run")["write_timestamp"].min().sort_index()
-    max_times = df.groupby("collection_run")["write_timestamp"].max().sort_index()
+
+def drop_overlapping(df):
+
+    min_times = df.groupby("collection_run")["write_datetime"].min().sort_index()
+    max_times = df.groupby("collection_run")["write_datetime"].max().sort_index()
 
     for prev_idx, min_time in enumerate(min_times[1:]):
 
@@ -58,37 +95,9 @@ def drop_overlapping(df, print_prefix=""):
 
             df = df[~overlapping]
 
-            print(
-                f"{print_prefix} - {prev_dir_name} - Dropped {overlapping.sum()} rows"
-            )
+            print(f"{prev_dir_name} - Dropped {overlapping.sum()} rows due to overlap")
 
     return df.copy()
-
-
-def load_train_test(train_dirs, test_dirs):
-
-    all_dirs = train_dirs + test_dirs
-
-    with multiprocessing.Manager() as manager:
-
-        dfs = manager.dict()
-
-        n_dirs = len(all_dirs)
-        with multiprocessing.Pool(processes=min(n_dirs, 6)) as pool:
-
-            args = zip(all_dirs, [["ETH-USDT"]] * n_dirs, [dfs] * n_dirs)
-            pool.starmap(_load_and_add_to_dict, args)
-
-        dfs_train = [df for name, df in dfs.items() if name in train_dirs]
-        dfs_test = [df for name, df in dfs.items() if name in test_dirs]
-
-    df_train = pd.concat(dfs_train).sort_index()
-    df_test = pd.concat(dfs_test).sort_index()
-
-    df_train = drop_overlapping(df_train, "train")
-    df_test = drop_overlapping(df_test, "test")
-
-    return df_train, df_test
 
 
 def _get_rolling_block(x, window_size):
@@ -101,9 +110,12 @@ def _get_rolling_block(x, window_size):
     return out
 
 
-def blockify_data(x, n_history, n_ahead=0):
+def blockify_data(x, n_history, n_ahead=0, split=True):
 
     blocks = _get_rolling_block(x, n_history + n_ahead)
+
+    if not split:
+        return blocks
 
     history = blocks[:, :n_history]
     price = history[:, -1].reshape(-1)
@@ -119,6 +131,46 @@ def blockify_data(x, n_history, n_ahead=0):
         ahead = None
 
     return price, history, ahead
+
+
+def pre_process(df, n_history=120, n_ahead=240, price_col="bid"):
+
+    # Sort by time
+    df = df.sort_values("timestamp")
+
+    # Add columns
+    df["datetime"] = pd.to_datetime(df.timestamp, unit="s")
+    df["write_datetime"] = pd.to_datetime(df.write_time, unit="s")
+    df["time_diff"] = df.datetime.diff().dt.total_seconds()
+    df["spread"] = (df.bid - df.ask).abs()
+
+    # Set write datetime as index
+    df = df.reset_index(drop=True)
+    df = df.set_index("datetime", drop=True)
+
+    # Drop rows with overlapping ticks
+    # around mid-night when new job takes over there is a period of
+    # time when the data is collected by two result writers
+    df = drop_overlapping(df)
+
+    # Blockify
+    price, history, ahead = blockify_data(df[price_col], n_history, n_ahead)
+
+    # Drop timegaps
+    time_diff_blocks = blockify_data(df["time_diff"], n_history, n_ahead, split=False)
+    time_gap_elements = (time_diff_blocks < 0.2) | (2 < time_diff_blocks)
+    time_gap_blocks = np.any(time_gap_elements, axis=1)
+    price, history, ahead = (
+        price[~time_gap_blocks],
+        history[~time_gap_blocks],
+        ahead[~time_gap_blocks],
+    )
+    print(f"Dropped {time_gap_blocks.sum()} rows due to time gaps")
+
+    return price, history, ahead, time_gap_blocks
+
+
+#### Feature creation
 
 
 def _chunk_stats(x, col_name, fn, left_idx, right_idx, **fn_kwargs):
@@ -229,3 +281,22 @@ def create_features(price, chunk_idx, n_first_diff=10):
     df_features = df_features.drop(columns=[f"bid_mean_0_120"])
 
     return df_features
+
+
+if __name__ == "__main__":
+
+    train_dirs = [
+        "2021-04-03_235900_9f1b26c870364ee9ac41f4bbf522cb69",
+        "2021-04-04_235900_d08a787886b846359231e418aa2654f4",
+        "2021-04-05_235900_d633b719195c4991a040ef5d3a610f22",
+        "2021-04-06_235900_864be414a4e04f80bba38dcef7d46053",
+        "2021-04-07_235901_4c7e8300c7de48a285ca8816fc7bf6c5",
+    ]
+
+    val_dirs = None
+
+    test_dirs = None
+
+    train_data, val_data, test_data = load_train_val_test(
+        train_dirs, val_dirs, test_dirs
+    )
