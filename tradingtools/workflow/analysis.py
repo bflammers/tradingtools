@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 from tqdm.notebook import tqdm_notebook as tqdm
 
 
-def plot_buy_sell(price, signal, from_idx=0, to_idx=None):
+def plot_buy_sell(price, signal, gaps, from_idx=0, to_idx=None):
 
     buy, sell = signal == "buy", signal == "sell"
     
@@ -24,10 +24,14 @@ def plot_buy_sell(price, signal, from_idx=0, to_idx=None):
     x3 = x1[sell[from_idx:to_idx]]
     y3 = y1[sell[from_idx:to_idx]]
 
+    x4 = x1[gaps[from_idx:to_idx]]
+    y4 = y1[gaps[from_idx:to_idx]]
+
     plt.figure(figsize=(20, 8))
     plt.plot(x1, y1, color='orange')
     plt.plot(x2, y2, "^", color='green')
     plt.plot(x3, y3, "v", color='red')
+    plt.plot(x4, y4, "X", color='blue')
 
 def plot_price_profit(price, profit, from_idx=0, to_idx=None):
     
@@ -47,7 +51,7 @@ def plot_price_profit(price, profit, from_idx=0, to_idx=None):
     ax2.set_ylabel('profit') 
     ax2.plot(y2, color="orange")
 
-def backtest(price, signals, cost_factor=0.001, verbose=True):
+def backtest(price, signals, gaps, cost_factor=0.001, verbose=True):
     
     buy, sell = signals == "buy", signals == "sell"
     
@@ -66,15 +70,26 @@ def backtest(price, signals, cost_factor=0.001, verbose=True):
 
     for i, p in iter_price:
 
-        if buy[i] and not exposed:
-            exposed = True
-            buy_price = p
-            n_orders += 1
+        if gaps[i]:
+            
+            # Make sure we are not exposed during time gaps
+            if exposed:
+                exposed = False
+                profit += p - buy_price - cost_factor * (buy_price + p)
+                n_orders += 1
+            
+        else:
 
-        if sell[i] and exposed:
-            exposed = False
-            profit += p - buy_price - cost_factor * (buy_price + p)
-            n_orders += 1
+            # Normal flow
+            if buy[i] and not exposed:
+                exposed = True
+                buy_price = p
+                n_orders += 1
+
+            if sell[i] and exposed:
+                exposed = False
+                profit += p - buy_price - cost_factor * (buy_price + p)
+                n_orders += 1
 
         profit_over_time[i] = profit
         exposed_over_time[i] = int(exposed)

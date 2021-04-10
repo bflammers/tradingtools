@@ -139,10 +139,10 @@ def pre_process(df, n_history=120, n_ahead=240, price_col="bid"):
     df = df.sort_values("timestamp")
 
     # Add columns
-    df["datetime"] = pd.to_datetime(df.timestamp, unit="s")
-    df["write_datetime"] = pd.to_datetime(df.write_time, unit="s")
-    df["time_diff"] = df.datetime.diff().dt.total_seconds()
-    df["spread"] = (df.bid - df.ask).abs()
+    df["datetime"] = pd.to_datetime(df["timestamp"], unit="s")
+    df["time_diff"] = df["datetime"].diff().dt.total_seconds()
+    df["write_datetime"] = pd.to_datetime(df["write_time"], unit="s")
+    df["spread"] = (df["bid"] - df["ask"]).abs()
 
     # Set write datetime as index
     df = df.reset_index(drop=True)
@@ -158,7 +158,7 @@ def pre_process(df, n_history=120, n_ahead=240, price_col="bid"):
 
     # Drop timegaps
     time_diff_blocks = blockify_data(df["time_diff"], n_history, n_ahead, split=False)
-    time_gap_elements = (time_diff_blocks < 0.2) | (2 < time_diff_blocks)
+    time_gap_elements = (time_diff_blocks < 0.1) | (5.0 < time_diff_blocks)
     time_gap_blocks = np.any(time_gap_elements, axis=1)
     price, history, ahead = (
         price[~time_gap_blocks],
@@ -167,7 +167,11 @@ def pre_process(df, n_history=120, n_ahead=240, price_col="bid"):
     )
     print(f"Dropped {time_gap_blocks.sum()} rows due to time gaps")
 
-    return price, history, ahead, time_gap_blocks
+    # Heads-up for time gap
+    upcoming_gap = np.append(time_gap_blocks[1:], False)
+    upcoming_gap = upcoming_gap[~time_gap_blocks]
+
+    return price, history, ahead, upcoming_gap
 
 
 #### Feature creation
