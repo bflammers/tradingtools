@@ -100,25 +100,41 @@ def drop_overlapping(df):
     return df.copy()
 
 
-def _get_rolling_block(x, window_size):
+def get_rolling_block(x, window_size, center=False):
     # https://stackoverflow.com/a/47483615/4909087
     # https://stackoverflow.com/a/46199050/4800652
-    out_shape = (len(x) - (window_size - 1), window_size)
+    len_decrease = window_size - 1
+    
+    out_shape = (len(x) - len_decrease, window_size)
+    strides = x.values.strides if isinstance(x, pd.Series) else x.strides
     out = np.lib.stride_tricks.as_strided(
-        x, shape=out_shape, strides=(x.values.strides * 2)
+        x, shape=out_shape, strides=(strides * 2)
     )
+
+    prepend_len = int(np.ceil(len_decrease / 2)) if center else len_decrease
+    prepend = np.full((prepend_len, window_size), np.nan)
+    out = np.concatenate((prepend, out))
+
+    if center: 
+        postpend_len = int(np.floor(len_decrease / 2))
+        postpend = np.full((postpend_len, window_size), np.nan)
+        out = np.concatenate((out, postpend))
+
     return out
 
 
 def blockify_data(x, n_history, n_ahead=0, split=True):
 
-    blocks = _get_rolling_block(x, n_history + n_ahead)
+    window_size = n_history + n_ahead
+    blocks = get_rolling_block(x, window_size)
+    idx_blocks = get_rolling_block(np.arange(len(x)), window_size)
 
     if not split:
-        return blocks
+        return blocks, idx_blocks
 
     history = blocks[:, :n_history]
-    price = history[:, -1].reshape(-1)
+    price = blocks[:, n_history].reshape(-1)
+    idx_price = idx_blocks[:, n_history].reshape(-1)
 
     assert history.shape[1] == n_history
     assert len(price) == history.shape[0]
@@ -130,7 +146,7 @@ def blockify_data(x, n_history, n_ahead=0, split=True):
     else:
         ahead = None
 
-    return price, history, ahead
+    return price, history, ahead, idx_price
 
 
 def pre_process(df, n_history=120, n_ahead=240, price_col="bid"):
@@ -151,19 +167,20 @@ def pre_process(df, n_history=120, n_ahead=240, price_col="bid"):
     # Drop rows with overlapping ticks
     # around mid-night when new job takes over there is a period of
     # time when the data is collected by two result writers
-    df = drop_overlapping(df)
+    # df = drop_overlapping(df)
 
     # Blockify
-    price, history, ahead = blockify_data(df[price_col], n_history, n_ahead)
+    price, history, ahead, price_idx = blockify_data(df[price_col], n_history, n_ahead)
 
     # Drop timegaps
-    time_diff_blocks = blockify_data(df["time_diff"], n_history, n_ahead, split=False)
+    time_diff_blocks, _ = blockify_data(df["time_diff"], n_history, n_ahead, split=False)
     time_gap_elements = (time_diff_blocks < 0.1) | (5.0 < time_diff_blocks)
     time_gap_blocks = np.any(time_gap_elements, axis=1)
-    price, history, ahead = (
+    price, history, ahead, price_idx = (
         price[~time_gap_blocks],
         history[~time_gap_blocks],
         ahead[~time_gap_blocks],
+        price_idx[~time_gap_blocks]
     )
     print(f"Dropped {time_gap_blocks.sum()} rows due to time gaps")
 
@@ -171,7 +188,7 @@ def pre_process(df, n_history=120, n_ahead=240, price_col="bid"):
     upcoming_gap = np.append(time_gap_blocks[1:], False)
     upcoming_gap = upcoming_gap[~time_gap_blocks]
 
-    return price, history, ahead, upcoming_gap
+    return price, history, ahead, upcoming_gap, price_idx
 
 
 #### Feature creation

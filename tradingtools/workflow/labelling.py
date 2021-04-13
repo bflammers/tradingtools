@@ -104,7 +104,7 @@ def create_signals(history, ahead, args=None):
     return targets
 
 
-def objective(params, price, history, ahead, cost_factor=0.0025):
+def objective(params, price, history, ahead, gaps, cost_factor=0.002):
 
     """Objective for hyperparameter optimization using Ray tune
 
@@ -113,6 +113,6 @@ def objective(params, price, history, ahead, cost_factor=0.0025):
     """
     
     signals = create_signals(history, ahead, args=params)
-    profit, _, _ = backtest(price, signals, cost_factor, verbose=False)
+    profit, _, _ = backtest(price, signals, gaps, cost_factor, verbose=False)
     
     return profit[-1]
