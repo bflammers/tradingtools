@@ -101,21 +101,25 @@ def drop_overlapping(df):
 
 
 def get_rolling_block(x, window_size, center=False):
+    len_decrease = window_size - 1
+    out_shape = (len(x) - len_decrease, window_size)
+    
+    # Stride tricks for getting rolling window effect
     # https://stackoverflow.com/a/47483615/4909087
     # https://stackoverflow.com/a/46199050/4800652
-    len_decrease = window_size - 1
-    
-    out_shape = (len(x) - len_decrease, window_size)
     strides = x.values.strides if isinstance(x, pd.Series) else x.strides
     out = np.lib.stride_tricks.as_strided(
         x, shape=out_shape, strides=(strides * 2)
     )
 
+    # Prepend nans rows, size depends on whether the window should be centered
     prepend_len = int(np.ceil(len_decrease / 2)) if center else len_decrease
     prepend = np.full((prepend_len, window_size), np.nan)
     out = np.concatenate((prepend, out))
 
     if center: 
+        # Postpend nans, same size as prepend for even number of total rows to
+        # pre/postpend, one less for odd number of total rows to pre/postpend
         postpend_len = int(np.floor(len_decrease / 2))
         postpend = np.full((postpend_len, window_size), np.nan)
         out = np.concatenate((out, postpend))
