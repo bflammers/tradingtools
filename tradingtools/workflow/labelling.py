@@ -3,25 +3,22 @@ import inspect
 import pandas as pd
 import numpy as np
 
-from .analysis import backtest
 
 def judge_buy(
     history,
     ahead,
-    b_irr=0.002,
-    b_n_irr=120,
-    b_p_irr=0.65, 
-    b_nrr=6e-03, 
-    b_n_nrr=35,
-    b_p_nrr=0.55,
-    b_incr_nh=2,
-    b_incr_na=5,
+    b_irr=0.003,
+    b_n_irr=190,
+    b_p_irr=0.3, 
+    b_nrr=0.00025, 
+    b_n_nrr=30,
+    b_p_nrr=0.06,
+    b_incr_nh=3,
+    b_incr_na=7,
 ):
 
+    # Divide history into current price and actual history
     current, history = history[:, -1], history[:, :-1]
-
-    b_n_irr = np.clip(b_n_irr, 5, ahead.shape[1])
-    b_n_nrr = np.clip(b_n_nrr, 5, ahead.shape[1])
 
     # In the money check
     irr_ahead = ahead[:, :b_n_irr] > (current * (1 + b_irr))[:, None]
@@ -42,20 +39,18 @@ def judge_buy(
 def judge_sell(
     history,
     ahead,
-    s_irr=0.004,
-    s_n_irr=120,
-    s_p_irr=6e-2, 
-    s_prr=1e-5,
-    s_n_prr=33, 
-    s_p_prr=0.55,
-    s_decr_nh=2,
-    s_decr_na=2
+    s_irr=0.003,
+    s_n_irr=190,
+    s_p_irr=0.3, 
+    s_prr=0.0001,
+    s_n_prr=10, 
+    s_p_prr=0.15,
+    s_decr_nh=3,
+    s_decr_na=7
 ):
 
+    # Divide history into current price and actual history
     current, history = history[:, -1], history[:, :-1]
-
-    s_n_irr = np.clip(s_n_irr, 5, ahead.shape[1])
-    s_n_prr = np.clip(s_n_prr, 5, ahead.shape[1])
 
     # In the money check
     irr_ahead = ahead[:, :s_n_irr] < (current * (1 - s_irr))[:, None]
@@ -97,22 +92,11 @@ def create_signals(history, ahead, args=None):
     buy = judge_buy_wrapper(history, ahead)
     sell = judge_sell_wrapper(history, ahead)
 
-    targets = pd.Series(["hold"] * history.shape[0])
+    targets = np.full(len(history), "hold")
     targets[buy] = "buy"
     targets[sell] = "sell"
 
     return targets
 
 
-def objective(params, price, history, ahead, gaps, cost_factor=0.002):
 
-    """Objective for hyperparameter optimization using Ray tune
-
-    Returns:
-        float: profit over provided data window
-    """
-    
-    signals = create_signals(history, ahead, args=params)
-    profit, _, _ = backtest(price, signals, gaps, cost_factor, verbose=False)
-    
-    return profit[-1]

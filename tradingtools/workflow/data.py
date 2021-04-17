@@ -12,22 +12,24 @@ from tqdm.notebook import tqdm_notebook as tqdm
 #### Dataloading
 
 
-def _load_and_add_to_dict(dir_name, pairs, dfs_dict):
+def _load_and_add_to_dict(dir_name, dfs_dict, pairs=None):
 
     # Construct path
-    binance_path = Path.cwd().parent / "data/collected/binance"
+    if Path("./data/collected/binance").exists():
+        binance_path = Path("data/collected/binance")
+    else:
+        binance_path = Path.cwd().parent / "data/collected/binance"
     data_path = binance_path / dir_name
-    ticks_path = [p for p in list(data_path.glob("*")) if re.findall("ticks", str(p))][
-        0
-    ]
+    ticks_path = [p for p in data_path.glob("*") if re.findall("ticks", str(p))][0]
 
     # Read data
     df = pd.read_csv(ticks_path)
     print(f"{dir_name[:25]} - Total data shape: ", df.shape)
 
     # Filter pairs
-    df = df[df.pair.isin(pairs)]
-    print(f"{dir_name[:25]} - Pairs data shape: ", df.shape)
+    if pairs is not None:
+        df = df[df.pair.isin(pairs)]
+        print(f"{dir_name[:25]} - Pairs data shape: ", df.shape)
 
     # Add which collection run this data was collected in, for removing overlap later
     df["collection_run"] = dir_name
@@ -36,7 +38,9 @@ def _load_and_add_to_dict(dir_name, pairs, dfs_dict):
     dfs_dict[dir_name] = df
 
 
-def load_train_val_test(train_dirs, val_dirs=None, test_dirs=None, n_pool=11):
+def load_train_val_test(
+    train_dirs, val_dirs=None, test_dirs=None, pairs=["ETH-USDT"], n_pool=11
+):
 
     all_dirs = train_dirs
 
@@ -53,24 +57,33 @@ def load_train_val_test(train_dirs, val_dirs=None, test_dirs=None, n_pool=11):
         n_dirs = len(all_dirs)
         with multiprocessing.Pool(processes=min(n_dirs, n_pool)) as pool:
 
-            args = zip(all_dirs, [["ETH-USDT"]] * n_dirs, [dfs] * n_dirs)
+            args = zip(all_dirs, [dfs] * n_dirs, [pairs] * n_dirs)
             pool.starmap(_load_and_add_to_dict, args)
 
         # Train data
-        dfs_train = [df for name, df in dfs.items() if name in train_dirs]
-        df_train = pd.concat(dfs_train)
+        df_train = pd.concat([df for name, df in dfs.items() if name in train_dirs])
+        print(f"Train counts: \n{df_train.pair.value_counts()}")
+        dups_train = df_train[["timestamp", "pair", "bid", "ask"]].duplicated()
+        df_train = df_train[~dups_train]
+        print(f"-- train dropped duplicates: {dups_train.sum()}")
         result = (df_train,)
 
         # Validation data
         if val_dirs:
-            dfs_val = [df for name, df in dfs.items() if name in val_dirs]
-            df_val = pd.concat(dfs_val)
+            df_val = pd.concat([df for name, df in dfs.items() if name in val_dirs])
+            print(f"Validation counts: \n{df_val.pair.value_counts()}")
+            dups_val = df_val[["timestamp", "pair", "bid", "ask"]].duplicated()
+            df_val = df_val[~dups_val]
+            print(f"-- train dropped duplicates: {dups_train.sum()}")
             result += (df_val,)
 
         # Test data
         if test_dirs:
-            dfs_test = [df for name, df in dfs.items() if name in test_dirs]
-            df_test = pd.concat(dfs_test)
+            df_test = pd.concat([df for name, df in dfs.items() if name in test_dirs])
+            print(f"Test counts: \n{df_test.pair.value_counts()}")
+            dups_test = df_test[["timestamp", "pair", "bid", "ask"]].duplicated()
+            df_test = df_test[~dups_test]
+            print(f"-- train dropped duplicates: {dups_test.sum()}")
             result += (df_test,)
 
     return result
@@ -100,73 +113,78 @@ def drop_overlapping(df):
     return df.copy()
 
 
-def get_rolling_block(x, window_size, center=False):
+def get_rolling_block(x, window_size, same_size=False, center=False):
     len_decrease = window_size - 1
     out_shape = (len(x) - len_decrease, window_size)
-    
+
     # Stride tricks for getting rolling window effect
     # https://stackoverflow.com/a/47483615/4909087
     # https://stackoverflow.com/a/46199050/4800652
     strides = x.values.strides if isinstance(x, pd.Series) else x.strides
-    out = np.lib.stride_tricks.as_strided(
-        x, shape=out_shape, strides=(strides * 2)
-    )
+    out = np.lib.stride_tricks.as_strided(x, shape=out_shape, strides=(strides * 2))
 
-    # Prepend nans rows, size depends on whether the window should be centered
-    prepend_len = int(np.ceil(len_decrease / 2)) if center else len_decrease
-    prepend = np.full((prepend_len, window_size), np.nan)
-    out = np.concatenate((prepend, out))
+    # Prepend and / or post pend nans if output should be same size
+    if same_size:
 
-    if center: 
-        # Postpend nans, same size as prepend for even number of total rows to
-        # pre/postpend, one less for odd number of total rows to pre/postpend
-        postpend_len = int(np.floor(len_decrease / 2))
-        postpend = np.full((postpend_len, window_size), np.nan)
-        out = np.concatenate((out, postpend))
+        # Prepend nans rows, size depends on whether the window should be centered
+        prepend_len = int(np.ceil(len_decrease / 2)) if center else len_decrease
+        prepend = np.full((prepend_len, window_size), np.nan)
+        out = np.concatenate((prepend, out))
+
+        if center:
+            # Postpend nans, same size as prepend for even number of total rows to
+            # pre/postpend, one less for odd number of total rows to pre/postpend
+            postpend_len = int(np.floor(len_decrease / 2))
+            postpend = np.full((postpend_len, window_size), np.nan)
+            out = np.concatenate((out, postpend))
 
     return out
 
 
 def blockify_data(x, n_history, n_ahead=0, split=True):
 
+    # Transform price array (1-dimensional) into block array with windows (2-dimensional)
     window_size = n_history + n_ahead
-    blocks = get_rolling_block(x, window_size)
-    idx_blocks = get_rolling_block(np.arange(len(x)), window_size)
+    blocks = get_rolling_block(x, window_size, same_size=False)
 
+    # Get index of each element in block array in original array x
+    full_idx = np.arange(len(x))
+    blocks_idx = get_rolling_block(full_idx, window_size, same_size=False)
+
+    # Return if not needed to split into history and ahead
     if not split:
-        return blocks, idx_blocks
+        return blocks, blocks_idx
 
+    # Construct blocks (rolling windows)
+    # history + index of the latest known value in history
     history = blocks[:, :n_history]
-    price = blocks[:, n_history].reshape(-1)
-    idx_price = idx_blocks[:, n_history].reshape(-1)
-
+    latest_idx = blocks_idx[:, (n_history - 1)].reshape(-1)
     assert history.shape[1] == n_history
-    assert len(price) == history.shape[0]
 
+    # Ahead, set to None if n_ahead = 0
     if n_ahead > 0:
         ahead = blocks[:, n_history:]
         assert ahead.shape[1] == n_ahead
-        assert len(price) == ahead.shape[0]
     else:
         ahead = None
 
-    return price, history, ahead, idx_price
+    return history, latest_idx, ahead
 
 
-def pre_process(df, n_history=120, n_ahead=240, price_col="bid"):
+def _pre_processing_pair(df_pair, n_history, n_ahead, price_col):
 
     # Sort by time
-    df = df.sort_values("timestamp")
+    df_pair = df_pair.sort_values("timestamp")
 
     # Add columns
-    df["datetime"] = pd.to_datetime(df["timestamp"], unit="s")
-    df["time_diff"] = df["datetime"].diff().dt.total_seconds()
-    df["write_datetime"] = pd.to_datetime(df["write_time"], unit="s")
-    df["spread"] = (df["bid"] - df["ask"]).abs()
+    df_pair["datetime"] = pd.to_datetime(df_pair["timestamp"], unit="s")
+    df_pair["time_diff"] = df_pair["datetime"].diff().dt.total_seconds()
+    df_pair["write_datetime"] = pd.to_datetime(df_pair["write_time"], unit="s")
+    df_pair["spread"] = (df_pair["bid"] - df_pair["ask"]).abs()
 
     # Set write datetime as index
-    df = df.reset_index(drop=True)
-    df = df.set_index("datetime", drop=True)
+    df_pair = df_pair.reset_index(drop=True)
+    df_pair = df_pair.set_index("datetime", drop=False)
 
     # Drop rows with overlapping ticks
     # around mid-night when new job takes over there is a period of
@@ -174,25 +192,93 @@ def pre_process(df, n_history=120, n_ahead=240, price_col="bid"):
     # df = drop_overlapping(df)
 
     # Blockify
-    price, history, ahead, price_idx = blockify_data(df[price_col], n_history, n_ahead)
-
-    # Drop timegaps
-    time_diff_blocks, _ = blockify_data(df["time_diff"], n_history, n_ahead, split=False)
-    time_gap_elements = (time_diff_blocks < 0.1) | (5.0 < time_diff_blocks)
-    time_gap_blocks = np.any(time_gap_elements, axis=1)
-    price, history, ahead, price_idx = (
-        price[~time_gap_blocks],
-        history[~time_gap_blocks],
-        ahead[~time_gap_blocks],
-        price_idx[~time_gap_blocks]
+    history_pair, latest_idx_pair, ahead_pair = blockify_data(
+        df_pair[price_col], n_history, n_ahead
     )
-    print(f"Dropped {time_gap_blocks.sum()} rows due to time gaps")
+    time_diff_blocks, _ = blockify_data(
+        df_pair["time_diff"], n_history, n_ahead, split=False
+    )
 
-    # Heads-up for time gap
-    upcoming_gap = np.append(time_gap_blocks[1:], False)
-    upcoming_gap = upcoming_gap[~time_gap_blocks]
+    # Calculate historical window mean and variance for standardization
+    window_means = np.mean(history_pair, axis=1)
+    window_stds = np.std(history_pair, axis=1)
 
-    return price, history, ahead, upcoming_gap, price_idx
+    # Determine windows with zero variance
+    # Determine windows with time gaps
+    zero_var = window_stds < 1e-15
+    time_gap_elements = (time_diff_blocks < 0.1) | (10.0 < time_diff_blocks)
+    time_gap_blocks = np.any(time_gap_elements, axis=1)
+    gaps = time_gap_blocks | zero_var
+
+    # Drop zero variance and timegaps windows
+    history_pair = history_pair[~gaps]
+    latest_idx_pair = latest_idx_pair[~gaps]
+    ahead_pair = ahead_pair[~gaps]
+    window_means = window_means[~gaps]
+    window_stds = window_stds[~gaps]
+
+    print(f"-- Dropped {zero_var.sum()} rows due to (near-) zero variance")
+    print(f"-- Dropped {time_gap_blocks.sum()} rows due to time gaps")
+
+    # Standardize
+    history_pair -= window_means[:, None]
+    history_pair /= window_stds[:, None]
+    ahead_pair -= window_means[:, None]
+    ahead_pair /= window_stds[:, None]
+
+
+    # Construct boolean column that indicates when a timegap/zerovar is about to happen
+    upcoming_gap = np.append(gaps[1:], False)
+    upcoming_gap = upcoming_gap[~gaps]
+
+    # Data frame with info about latest price, latest idx, timegaps and dates
+    # Not used in models (numphistory and ahead contain all information) but useful
+    # for backtesting and visualization
+    df_price_pair = pd.DataFrame(
+        {
+            "price": df_pair[price_col].iloc[latest_idx_pair],
+            "standardized_price": history_pair[:, -1],
+            "upcoming_gap": upcoming_gap,
+            "original_index": latest_idx_pair,
+            "window_mean": window_means,
+            "window_stds": window_stds 
+        },
+        index=df_pair["datetime"].iloc[latest_idx_pair],
+    )
+
+    return df_price_pair, history_pair, ahead_pair
+
+
+def pre_process(df, n_history=120, n_ahead=190, price_col="bid"):
+
+    price_dfs = []
+    history_arrays = []
+    ahead_arrays = []
+
+    for pair, df_pair in df.groupby("pair"):
+
+        # Print pair
+        print(f"Starting with: {pair}, shape: {df_pair.shape}")
+
+        # Pre process per pair
+        price_pair, history_pair, ahead_pair = _pre_processing_pair(
+            df_pair, n_history, n_ahead, price_col
+        )
+
+        # Add coin to price pair dataframe
+        price_pair["pair"] = pair
+
+        # Append to holders
+        price_dfs.append(price_pair)
+        history_arrays.append(history_pair)
+        ahead_arrays.append(ahead_pair)
+
+    # Concatenate arrays and dataframes
+    df_price = pd.concat(price_dfs)
+    history = np.concatenate(history_arrays)
+    ahead = np.concatenate(ahead_arrays)
+
+    return df_price, history, ahead
 
 
 #### Feature creation
@@ -310,18 +396,13 @@ def create_features(price, chunk_idx, n_first_diff=10):
 
 if __name__ == "__main__":
 
-    train_dirs = [
-        "2021-04-03_235900_9f1b26c870364ee9ac41f4bbf522cb69",
-        "2021-04-04_235900_d08a787886b846359231e418aa2654f4",
-        "2021-04-05_235900_d633b719195c4991a040ef5d3a610f22",
-        "2021-04-06_235900_864be414a4e04f80bba38dcef7d46053",
-        "2021-04-07_235901_4c7e8300c7de48a285ca8816fc7bf6c5",
-    ]
+    train_dirs = ["2021-04-03_235900_9f1b26c870364ee9ac41f4bbf522cb69"]
 
     val_dirs = None
 
     test_dirs = None
 
-    train_data, val_data, test_data = load_train_val_test(
-        train_dirs, val_dirs, test_dirs
-    )
+    pairs = ["BTC-USDT", "ETH-USDT", "XRP-BNB", "ADA-BNB", "DOT-BNB"]
+    (train_data,) = load_train_val_test(train_dirs, val_dirs, test_dirs, pairs)
+
+    all_prices, all_history, all_ahead = pre_process(train_data, 120, 190)
