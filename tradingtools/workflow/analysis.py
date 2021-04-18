@@ -51,6 +51,11 @@ def plot_pairs(df, from_idx=0, to_idx=None):
             df_gaps = df_pair["price"][df_pair["upcoming_gap"]]
             df_gaps.plot(ax=axes[i + 1], marker="X", linestyle="None", color="orange")
 
+        # Plot profit from backtest
+        if "profit" in df_pair:
+            line_color = "green" if df_pair["profit"][-1] > 0 else "red"
+            df_pair["profit"].plot(ax=axes[i + 1], color=line_color, secondary_y=True)
+
         # Align x-axis
         axes[i + 1].set_xlim(dates["min_date"], dates["max_date"])
 
