@@ -41,6 +41,8 @@ class DataFeed:
         self.fh = FeedHandler()
         self.running = False
         self.current_instruments = set()
+        self.ticker_callback = None
+        self.trades_callback = None
 
     def add_consumers(
         self,
@@ -54,28 +56,35 @@ class DataFeed:
 
         if trades_consumer:
             self.trades_callback = make_trade_callback(trades_consumer.add_to_q)
-        
+
         if nbbo_consumer:
             self.nbbo_callback = make_nbbo_callback(nbbo_consumer.add_to_q)
-    
+
         self._consumers_running = True
 
     def add_instruments(self, pairs: list):
 
+        config = dict()
+        callbacks = dict()
+
+        if self.ticker_callback is not None:
+            config[TICKER] = pairs
+            callbacks[TICKER] = TickerCallback(self.ticker_callback)
+
+        if self.trades_callback is not None:
+            config[TRADES] = pairs
+            callbacks[TRADES] = TradeCallback(self.trades_callback)
+
         # Add instruments to feed
-        config = {TRADES: pairs, TICKER: pairs}
         self.fh.add_feed(
             self.exchange(
                 config=config,
-                callbacks={
-                    TICKER: TickerCallback(self.ticker_callback),
-                    TRADES: TradeCallback(self.trades_callback),
-                },
+                callbacks=callbacks,
             )
         )
 
     def add_nbbo(self, exchanges: list, instruments: list) -> None:
-    
+
         self.fh.add_nbbo(exchanges, instruments, self.nbbo_callback)
 
     def run(self):
@@ -132,7 +141,6 @@ class OptionsDataFeed(DataFeed):
         instruments: List = ["BTC-USD", "ETH-USD"],
     ) -> None:
         super().add_nbbo(exchanges, instruments)
-
 
     def add_instruments(self, instruments: list):
 
