@@ -66,9 +66,9 @@ def plot_pairs(df, from_idx=0, to_idx=None):
     fig.tight_layout()
 
 
-def backtest(df, cost_factor=0.001, verbose=True):
+def backtest(price, signals, gaps, cost_factor=0.001, verbose=True):
 
-    buy, sell = df["signals"] == "buy", df["signals"] == "sell"
+    buy, sell = signals == "buy", signals == "sell"
 
     exposed = False
     buy_price = 0
