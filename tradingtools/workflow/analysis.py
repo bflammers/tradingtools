@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 
 from matplotlib import pyplot as plt
-
 from tqdm.notebook import tqdm_notebook as tqdm
+
+from .labelling import create_signals
 
 
 def plot_pairs(df, from_idx=0, to_idx=None):
@@ -66,57 +67,7 @@ def plot_pairs(df, from_idx=0, to_idx=None):
     fig.tight_layout()
 
 
-def backtest(price, signals, gaps, cost_factor=0.001, verbose=True):
-
-    buy, sell = signals == "buy", signals == "sell"
-
-    exposed = False
-    buy_price = 0
-    profit = 0
-    n_orders = 0
-
-    profit_over_time = np.zeros(len(price))
-    exposed_over_time = np.zeros(len(price))
-
-    if verbose:
-        iter_price = enumerate(tqdm(price))
-    else:
-        iter_price = enumerate(price)
-
-    for i, p in iter_price:
-
-        if gaps[i]:
-
-            # Make sure we are not exposed during time gaps
-            if exposed:
-                exposed = False
-                profit += p - buy_price - cost_factor * (buy_price + p)
-                n_orders += 1
-
-        else:
-
-            # Normal flow
-            if buy[i] and not exposed:
-                exposed = True
-                buy_price = p
-                n_orders += 1
-
-            if sell[i] and exposed:
-                exposed = False
-                profit += p - buy_price - cost_factor * (buy_price + p)
-                n_orders += 1
-
-        profit_over_time[i] = profit
-        exposed_over_time[i] = int(exposed)
-
-    if verbose:
-        print(f"Total profit: {profit}")
-        print(f"Number of orders: {n_orders}")
-
-    return profit_over_time, exposed_over_time, n_orders
-
-
-def objective(params, price, history, ahead, gaps, cost_factor=0.002):
+def objective(params, df, history, ahead, cost_factor=0.002):
 
     """Objective for hyperparameter optimization using Ray tune
 
@@ -124,10 +75,15 @@ def objective(params, price, history, ahead, gaps, cost_factor=0.002):
         float: profit over provided data window
     """
 
-    signals = create_signals(history, ahead, args=params)
-    profit, _, _ = backtest(price, signals, gaps, cost_factor, verbose=False)
+    # Create signals
+    df["signals"] = create_signals(history, ahead, args=params)
+    df["target_fraction"] = np.where(df["signals"] == "buy", 1, 0)
 
-    return profit[-1]
+    profit_percentage = backtest(
+        df, cost_factor=cost_factor, verbose=False, track_metrics=False
+    )
+
+    return profit_percentage
 
 
 class Portfolio:
@@ -200,35 +156,36 @@ class Portfolio:
 
 
 def backtest_pair(
-    df, starting_capital=1000, cost_factor=0.001, verbose=True, track_metrics=True
+    df_pair, starting_capital=1000, cost_factor=0.001, verbose=True, track_metrics=True
 ):
 
     portfolio = Portfolio(starting_capital, cost_factor)
     ticks_backtest = []
 
-    ticks = enumerate(df.itertuples())
+    ticks = df_pair.itertuples()
 
     if verbose:
-        ticks = tqdm(ticks, total=len(df))
+        ticks = tqdm(ticks, total=len(df_pair))
 
-    for i, tick in ticks:
+    for tick in ticks:
 
         if tick.upcoming_gap and portfolio.get_quantity() > 0:
             portfolio.update(tick.price, "sell", 0)
 
         else:
+            portfolio.update(
+                tick.price, tick.signals, tick.target_fraction
+            )
 
-            portfolio.update(tick.price, tick.signals, tick.target_fraction)
-
-            if track_metrics:
-                ticks_backtest.append(
-                    {
-                        "datetime": tick.Index,
-                        "value": portfolio.get_total_value(),
-                        "profit": portfolio.get_profit(),
-                        "quantity": portfolio.get_quantity(),
-                    }
-                )
+        if track_metrics:
+            ticks_backtest.append(
+                {
+                    "datetime": tick.Index,
+                    "value": portfolio.get_total_value(),
+                    "profit": portfolio.get_profit(),
+                    "quantity": portfolio.get_quantity(),
+                }
+            )
 
     if not track_metrics:
         return portfolio.get_profit()
@@ -236,6 +193,30 @@ def backtest_pair(
     df_backtest = pd.DataFrame(ticks_backtest)
     df_backtest = df_backtest.set_index("datetime")
     return df_backtest
+
+
+def backtest(
+    df, starting_capital=1000, cost_factor=0.001, verbose=True, track_metrics=True
+):
+
+    results = []
+    starting_capital_pair = starting_capital / df["pair"].nunique()
+
+    for _, df_pair in df.groupby("pair"):
+
+        backtest_result = backtest_pair(
+            df_pair=df_pair,
+            starting_capital=starting_capital_pair,
+            cost_factor=cost_factor,
+            verbose=verbose,
+            track_metrics=track_metrics,
+        )
+        results.append(backtest_result)
+
+    if not track_metrics:
+        return np.sum(results)
+
+    return pd.concat(results)
 
 
 if __name__ == "__main__":
