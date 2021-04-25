@@ -234,7 +234,7 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit=20)
     return df_price_pair, history, ahead
 
 
-def pre_process(df, n_history=120, n_ahead=190, price_col="bid"):
+def pre_process(df, n_history=120, n_ahead=190, price_col="bid", fill_limit=20):
 
     price_dfs = []
     history_arrays = []
@@ -247,7 +247,7 @@ def pre_process(df, n_history=120, n_ahead=190, price_col="bid"):
 
         # Pre process per pair
         price_pair, history_pair, ahead_pair = _pre_processing_pair(
-            df_pair, n_history, n_ahead, price_col
+            df_pair, n_history, n_ahead, price_col, fill_limit       
         )
 
         # Add coin to price pair dataframe
