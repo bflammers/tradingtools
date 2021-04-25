@@ -64,24 +64,25 @@ class DataFeed:
 
     def add_instruments(self, pairs: list):
 
-        config = dict()
-        callbacks = dict()
-
         if self.ticker_callback is not None:
-            config[TICKER] = pairs
-            callbacks[TICKER] = TickerCallback(self.ticker_callback)
+            # Add instruments to feed
+            self.fh.add_feed(
+                self.exchange(
+                    symbols=pairs,
+                    channels=[TICKER],
+                    callbacks={TICKER: TickerCallback(self.ticker_callback)},
+                )
+            )
 
         if self.trades_callback is not None:
-            config[TRADES] = pairs
-            callbacks[TRADES] = TradeCallback(self.trades_callback)
-
-        # Add instruments to feed
-        self.fh.add_feed(
-            self.exchange(
-                config=config,
-                callbacks=callbacks,
+            # Add instruments to feed
+            self.fh.add_feed(
+                self.exchange(
+                    symbols=pairs,
+                    channels=[TRADES],
+                    callbacks={TRADES: TradeCallback(self.trades_callback)},
+                )
             )
-        )
 
     def add_nbbo(self, exchanges: list, instruments: list) -> None:
 

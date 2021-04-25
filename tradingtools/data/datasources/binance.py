@@ -24,7 +24,7 @@ except:
 def binance_collect(
     results_dir_path: Path = "./data/testing/",
     ticks=True,
-    trades=False,
+    trades=True,
     pairs_regex="-USDT|-BNB",
 ):
 
