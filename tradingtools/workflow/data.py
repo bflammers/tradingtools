@@ -74,7 +74,7 @@ def load_train_val_test(
             print(f"Validation counts: \n{df_val.pair.value_counts()}")
             dups_val = df_val[["timestamp", "pair", "bid", "ask"]].duplicated()
             df_val = df_val[~dups_val]
-            print(f"-- train dropped duplicates: {dups_train.sum()}")
+            print(f"-- val dropped duplicates: {dups_train.sum()}")
             result += (df_val,)
 
         # Test data
@@ -83,7 +83,7 @@ def load_train_val_test(
             print(f"Test counts: \n{df_test.pair.value_counts()}")
             dups_test = df_test[["timestamp", "pair", "bid", "ask"]].duplicated()
             df_test = df_test[~dups_test]
-            print(f"-- train dropped duplicates: {dups_test.sum()}")
+            print(f"-- test dropped duplicates: {dups_test.sum()}")
             result += (df_test,)
 
     return result
@@ -141,7 +141,7 @@ def get_rolling_block(x, window_size, same_size=False, center=False):
     return out
 
 
-def blockify_data(x, n_history, n_ahead=0, split=True):
+def blockify_data(x, n_history, n_ahead=0):
 
     # Transform price array (1-dimensional) into block array with windows (2-dimensional)
     window_size = n_history + n_ahead
@@ -150,10 +150,6 @@ def blockify_data(x, n_history, n_ahead=0, split=True):
     # Get index of each element in block array in original array x
     full_idx = np.arange(len(x))
     blocks_idx = get_rolling_block(full_idx, window_size, same_size=False)
-
-    # Return if not needed to split into history and ahead
-    if not split:
-        return blocks, blocks_idx
 
     # Construct blocks (rolling windows)
     # history + index of the latest known value in history
@@ -171,61 +167,52 @@ def blockify_data(x, n_history, n_ahead=0, split=True):
     return history, latest_idx, ahead
 
 
-def _pre_processing_pair(df_pair, n_history, n_ahead, price_col):
+def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit=20):
 
     # Sort by time
     df_pair = df_pair.sort_values("timestamp")
 
-    # Add columns
-    df_pair["datetime"] = pd.to_datetime(df_pair["timestamp"], unit="s")
-    df_pair["time_diff"] = df_pair["datetime"].diff().dt.total_seconds()
-    df_pair["write_datetime"] = pd.to_datetime(df_pair["write_time"], unit="s")
-    df_pair["spread"] = (df_pair["bid"] - df_pair["ask"]).abs()
-
     # Set write datetime as index
-    df_pair = df_pair.reset_index(drop=True)
-    df_pair = df_pair.set_index("datetime", drop=False)
+    df_pair["datetime"] = pd.to_datetime(df_pair["timestamp"], unit="s")
+    df_pair = df_pair.set_index("datetime")
 
-    # Drop rows with overlapping ticks
-    # around mid-night when new job takes over there is a period of
-    # time when the data is collected by two result writers
-    # df = drop_overlapping(df)
+    # Drop duplicates
+    df_pair = df_pair[~df_pair.index.duplicated()]
+
+    # Price column, resample to 1 second frames
+    price = df_pair[price_col].copy()
+    price = price.resample("s").ffill(limit=ffill_limit)
 
     # Blockify
-    history_pair, latest_idx_pair, ahead_pair = blockify_data(
-        df_pair[price_col], n_history, n_ahead
-    )
-    time_diff_blocks, _ = blockify_data(
-        df_pair["time_diff"], n_history, n_ahead, split=False
-    )
+    history, latest_idx, ahead = blockify_data(price, n_history, n_ahead)
+    original_price = price.iloc[latest_idx]
 
     # Calculate historical window mean and variance for standardization
-    window_means = np.mean(history_pair, axis=1)
-    window_stds = np.std(history_pair, axis=1)
+    window_means = np.mean(history, axis=1)
+    window_stds = np.std(history, axis=1)
 
     # Determine windows with zero variance
     # Determine windows with time gaps
     zero_var = window_stds < 1e-15
-    time_gap_elements = (time_diff_blocks < 0.1) | (10.0 < time_diff_blocks)
-    time_gap_blocks = np.any(time_gap_elements, axis=1)
-    gaps = time_gap_blocks | zero_var
+    time_gap = np.any(np.isnan(history), axis=1) | np.any(np.isnan(ahead), axis=1)
+    gaps = zero_var | time_gap
 
     # Drop zero variance and timegaps windows
-    history_pair = history_pair[~gaps]
-    latest_idx_pair = latest_idx_pair[~gaps]
-    ahead_pair = ahead_pair[~gaps]
+    original_price = original_price[~gaps]
+    history = history[~gaps]
+    latest_idx = latest_idx[~gaps]
+    ahead = ahead[~gaps]
     window_means = window_means[~gaps]
     window_stds = window_stds[~gaps]
 
     print(f"-- Dropped {zero_var.sum()} rows due to (near-) zero variance")
-    print(f"-- Dropped {time_gap_blocks.sum()} rows due to time gaps")
+    print(f"-- Dropped {time_gap.sum()} rows due to time gaps")
 
     # Standardize
-    history_pair -= window_means[:, None]
-    history_pair /= window_stds[:, None]
-    ahead_pair -= window_means[:, None]
-    ahead_pair /= window_stds[:, None]
-
+    history -= window_means[:, None]
+    history /= window_stds[:, None]
+    ahead -= window_means[:, None]
+    ahead /= window_stds[:, None]
 
     # Construct boolean column that indicates when a timegap/zerovar is about to happen
     upcoming_gap = np.append(gaps[1:], False)
@@ -236,17 +223,15 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col):
     # for backtesting and visualization
     df_price_pair = pd.DataFrame(
         {
-            "price": df_pair[price_col].iloc[latest_idx_pair],
-            "standardized_price": history_pair[:, -1],
+            "price": original_price,
+            "standardized_price": history[:, -1],
             "upcoming_gap": upcoming_gap,
-            "original_index": latest_idx_pair,
             "window_mean": window_means,
-            "window_stds": window_stds 
-        },
-        index=df_pair["datetime"].iloc[latest_idx_pair],
+            "window_stds": window_stds,
+        }
     )
 
-    return df_price_pair, history_pair, ahead_pair
+    return df_price_pair, history, ahead
 
 
 def pre_process(df, n_history=120, n_ahead=190, price_col="bid"):

@@ -33,24 +33,32 @@ def plot_pairs(df, from_idx=0, to_idx=None):
     for i, (pair, df_pair) in enumerate(df_plot.groupby("pair")):
 
         # All prices, standardized
-        df_pair["standardized_price"].plot(
-            ax=axes[0], title="All - standardized", label=pair
-        )
+        if "standardized_price" in df_pair:
+            df_pair["standardized_price"].plot(
+                ax=axes[0], title="All - standardized", label=pair
+            )
 
         # Plot pair
         df_pair["price"].plot(ax=axes[i + 1], title=pair)
 
         # Plot signals
         if "signals" in df_pair:
+            
+            # Sell
             df_sell = df_pair["price"][df_pair["signals"] == "sell"]
-            df_sell.plot(ax=axes[i + 1], marker="v", linestyle="None", color="red")
+            if len(df_sell) > 0:
+                df_sell.plot(ax=axes[i + 1], marker="v", linestyle="None", color="red")
+
+            # Buy
             df_buy = df_pair["price"][df_pair["signals"] == "buy"]
-            df_buy.plot(ax=axes[i + 1], marker="^", linestyle="None", color="green")
+            if len(df_buy):
+                df_buy.plot(ax=axes[i + 1], marker="^", linestyle="None", color="green")
 
         # Plot markers for gaps
         if "upcoming_gap" in df_pair:
             df_gaps = df_pair["price"][df_pair["upcoming_gap"]]
-            df_gaps.plot(ax=axes[i + 1], marker="X", linestyle="None", color="orange")
+            if len(df_gaps) > 0:
+                df_gaps.plot(ax=axes[i + 1], marker="X", linestyle="None", color="orange")
 
         # Plot profit from backtest
         if "profit" in df_pair:
