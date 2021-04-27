@@ -44,7 +44,7 @@ nbbo_columns = ["symbol", "bid", "bid_size", "ask", "ask_size", "bid_feed", "ask
 # Create directory for results
 def create_results_dir(parent_dir: Path):
     now = pd.Timestamp.now().strftime("%F_%H%M%S")
-    ts_uuid = f"{now}_{uuid4().hex}"
+    ts_uuid = f"{now}_{uuid4().hex[:5]}"
     results_dir = (Path(parent_dir) / ts_uuid).absolute()
     results_dir.mkdir(parents=True, exist_ok=True)
     return results_dir
