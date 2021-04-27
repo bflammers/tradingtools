@@ -23,15 +23,15 @@ def judge_buy(
     rate_check = rate_ahead.mean(axis=1) > b_p_rate
 
     # Negative rate check
-    pos_rate_ahead = ahead[:, :b_n_rate] < (current * (1 - b_neg_rate_allowed))[:, None]
-    pos_rate_check = ~np.any(pos_rate_ahead, axis=1)
+    neg_rate_ahead = ahead[:, :b_n_rate] < (current * (1 - b_neg_rate_allowed))[:, None]
+    neg_rate_check = ~np.any(neg_rate_ahead, axis=1)
 
     # Increasing check
     incr_history = (history[:, -b_n_incr_before:] < current[:, None]).all(axis=1)
     incr_ahead = (current[:, None] < ahead[:, :b_n_incr_after]).all(axis=1)
     incr_check = incr_history & incr_ahead
 
-    return rate_check & pos_rate_check & incr_check
+    return rate_check & neg_rate_check & incr_check
 
 
 def judge_sell(
