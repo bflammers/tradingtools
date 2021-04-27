@@ -61,9 +61,9 @@ def plot_pairs(df, from_idx=0, to_idx=None):
                 df_gaps.plot(ax=axes[i + 1], marker="X", linestyle="None", color="orange")
 
         # Plot profit from backtest
-        if "profit" in df_pair:
-            line_color = "green" if df_pair["profit"][-1] > 0 else "red"
-            df_pair["profit"].plot(ax=axes[i + 1], color=line_color, secondary_y=True)
+        if "profit_percentage" in df_pair:
+            line_color = "green" if df_pair["profit_percentage"][-1] > 0 else "red"
+            df_pair["profit_percentage"].plot(ax=axes[i + 1], color=line_color, secondary_y=True)
 
         # Align x-axis
         axes[i + 1].set_xlim(dates["min_date"], dates["max_date"])
@@ -152,7 +152,7 @@ class Portfolio:
     def get_total_value(self):
         return self.capital_unallocated + self.capital_allocated
 
-    def get_profit(self):
+    def get_profit_percentage(self):
         return (
             (self.get_total_value() - self.starting_capital)
             / self.starting_capital
@@ -190,13 +190,13 @@ def backtest_pair(
                 {
                     "datetime": tick.Index,
                     "value": portfolio.get_total_value(),
-                    "profit": portfolio.get_profit(),
+                    "profit_percentage": portfolio.get_profit_percentage(),
                     "quantity": portfolio.get_quantity(),
                 }
             )
 
     if not track_metrics:
-        return portfolio.get_profit()
+        return portfolio.get_profit_percentage()
 
     df_backtest = pd.DataFrame(ticks_backtest)
     df_backtest = df_backtest.set_index("datetime")
@@ -222,7 +222,7 @@ def backtest(
         results.append(backtest_result)
 
     if not track_metrics:
-        return np.sum(results)
+        return np.mean(results)
 
     return pd.concat(results)
 
@@ -238,31 +238,31 @@ if __name__ == "__main__":
 
     p.update(100, "buy", 0.1)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())
     p.update(100, "hold", 0)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())
     p.update(100, "buy", 0.2)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())
     p.update(1000, "buy", 0.2)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())
     p.update(800, "hold", 0)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())
     p.update(800, "hold", 0)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())
     p.update(900, "sell", 0.1)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())
     p.update(950, "sell", 0.1)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())
     p.update(900, "sell", 0)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())
     p.update(900, "sell", 0)
     print(p.get_total_value())
-    print(p.get_profit())
+    print(p.get_profit_percentage())

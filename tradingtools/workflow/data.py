@@ -167,7 +167,18 @@ def blockify_data(x, n_history, n_ahead=0):
     return history, latest_idx, ahead
 
 
-def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit=20):
+def _print_drop(drop_col, reason):
+    n_drop = sum(drop_col)
+    drop_perc = round(n_drop / len(drop_col) * 100, 2)
+    print(f"-- Dropped {n_drop} rows ({drop_perc}%) because of {reason}")
+
+
+def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit):
+
+    # Drop duplicate timestamps
+    dup_timestamp = df_pair["timestamp"].duplicated()
+    df_pair = df_pair[~dup_timestamp].copy()
+    _print_drop(dup_timestamp, "duplicate timestamps")
 
     # Sort by time
     df_pair = df_pair.sort_values("timestamp")
@@ -205,8 +216,9 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit=20)
     window_means = window_means[~gaps]
     window_stds = window_stds[~gaps]
 
-    print(f"-- Dropped {zero_var.sum()} rows due to (near-) zero variance")
-    print(f"-- Dropped {time_gap.sum()} rows due to time gaps")
+    # Print
+    _print_drop(zero_var, "very small variance")
+    _print_drop(time_gap, "time gaps")
 
     # Standardize
     history -= window_means[:, None]
@@ -234,7 +246,7 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit=20)
     return df_price_pair, history, ahead
 
 
-def pre_process(df, n_history=120, n_ahead=190, price_col="bid", fill_limit=20):
+def pre_process(df, n_history=600, n_ahead=240, price_col="bid", fill_limit=60):
 
     price_dfs = []
     history_arrays = []
@@ -247,7 +259,7 @@ def pre_process(df, n_history=120, n_ahead=190, price_col="bid", fill_limit=20):
 
         # Pre process per pair
         price_pair, history_pair, ahead_pair = _pre_processing_pair(
-            df_pair, n_history, n_ahead, price_col, fill_limit       
+            df_pair, n_history, n_ahead, price_col, fill_limit
         )
 
         # Add coin to price pair dataframe
