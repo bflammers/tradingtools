@@ -6,7 +6,7 @@ import pandas as pd
 from uuid import uuid4
 from pathlib import Path
 from time import sleep, time
-from typing import Callable, Dict
+from typing import Callable, Dict, List
 
 try:
     from ..utils import warnings
@@ -24,7 +24,7 @@ ticks_columns = [
     "pair",
     "bid",
     "ask",
-    "write_time"
+    "write_time",
 ]
 
 trades_columns = [
@@ -36,10 +36,19 @@ trades_columns = [
     "amount",
     "price",
     "receipt_timestamp",
-    "write_time"
+    "write_time",
 ]
 
-nbbo_columns = ["symbol", "bid", "bid_size", "ask", "ask_size", "bid_feed", "ask_feed", "write_time"]
+nbbo_columns = [
+    "symbol",
+    "bid",
+    "bid_size",
+    "ask",
+    "ask_size",
+    "bid_feed",
+    "ask_feed",
+    "write_time",
+]
 
 # Create directory for results
 def create_results_dir(parent_dir: Path):
@@ -135,17 +144,19 @@ def threadsafe_generator(f):
 
 
 class CSVWriter(ThreadStream):
-    def __init__(self, path: Path, columns: list, single_row: bool = True) -> None:
+    def __init__(self, path: Path, columns: list, nested: bool = False) -> None:
         super().__init__(lifo=False)
 
         self.path = path
         self.columns = columns
         self._create_csv(self.path, self.columns)
 
-        if single_row:
-            self.add_consumer(consumer=self.append, interval_time=0)
+        if nested:
+            self.add_consumer(
+                consumer=self.append_nested, interval_time=0, batched=False
+            )
         else:
-            self.add_consumer(consumer=self.append_multiple, interval_time=0)
+            self.add_consumer(consumer=self.append, interval_time=0, batched=False)
 
     @staticmethod
     def _create_csv(path: Path, columns: list) -> None:
@@ -158,30 +169,19 @@ class CSVWriter(ThreadStream):
             writer = csv.writer(csv_file)
             writer.writerow(columns)
 
-    def append(self, new_values: dict) -> None:
+    def append(self, new_rows: List[dict]) -> None:
 
-        if new_values:
-
-            row = []
-
-            for column in self.columns:
-
-                try:
-                    row.append(new_values[column])
-                except TypeError:
-                    row.append(getattr(new_values, column))
-                except KeyError:
-                    row.append(None)
-                    warnings.warn(
-                        f"[CSVWriter.append] key-value pair for {column} not in new values for {self.path}"
-                    )
+        if new_rows:
 
             with open(self.path, "a") as csv_file:
-                writer = csv.writer(csv_file)
-                writer.writerow(row)
+                writer = csv.DictWriter(csv_file, fieldnames=self.columns)
+                writer.writerows(new_rows)
 
-    def append_multiple(
-        self, new_values_list: list, add_uuid: bool = False, add_timestamp: bool = False
+    def append_nested(
+        self,
+        new_rows_nested: List[List[dict]],
+        add_uuid: bool = False,
+        add_timestamp: bool = False,
     ) -> None:
 
         # Common fields
@@ -189,15 +189,19 @@ class CSVWriter(ThreadStream):
         timestamp = timestamp_to_string(pd.Timestamp.now())
 
         # Update volume for each symbol, add new if not yet present
-        for new_values in new_values_list:
+        for new_rows in new_rows_nested:
 
-            if add_uuid:
-                new_values["id"] = id
+            if add_uuid or add_timestamp:
 
-            if add_timestamp:
-                new_values["timestamp"] = timestamp
+                for new_row in new_rows:
 
-            self.append(new_values=new_values)
+                    if add_uuid:
+                        new_row["id"] = id
+
+                    if add_timestamp:
+                        new_row["timestamp"] = timestamp
+
+            self.append(new_rows=new_rows)
 
     def read(self) -> pd.DataFrame:
         df = pd.read_csv(self.path)
@@ -206,23 +210,23 @@ class CSVWriter(ThreadStream):
 
 if __name__ == "__main__":
 
-    import numpy as np
+    # import numpy as np
 
-    stream = ThreadStream()
+    # stream = ThreadStream()
 
-    producer = lambda: {"a": np.random.randn()}
-    consumer = lambda x: print(x, flush=True)
+    # producer = lambda: {"a": np.random.randn()}
+    # consumer = lambda x: print(x, flush=True)
 
-    stream.add_producer(producer, interval_time=0.1)
-    stream.add_consumer(consumer, interval_time=0.5, batched=True)
+    # stream.add_producer(producer, interval_time=0.1)
+    # stream.add_consumer(consumer, interval_time=0.5, batched=True)
 
-    # TODO: batch not yet working!!!
+    # # TODO: batch not yet working!!!
 
-    for i in range(100):
-        # print(len(stream.get_latest()))
-        sleep(0.1)
+    # for i in range(100):
+    #     # print(len(stream.get_latest()))
+    #     sleep(0.1)
 
-    exit()
+    # exit()
 
     # CSVWriter
 

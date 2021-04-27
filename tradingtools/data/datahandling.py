@@ -18,11 +18,14 @@ class ThreadStream:
     q: Queue
     stop_event: threading.Event = threading.Event()
     latest: list = []
-    batched: bool = False
     latest_when_empty: bool = False
+    block_until_next: bool = False
 
     def __init__(
-        self, lifo: bool = True, latest_when_empty: bool = False, max_q_size: int = 100000
+        self,
+        lifo: bool = True,
+        latest_when_empty: bool = False,
+        max_q_size: int = 100000,
     ) -> None:
 
         self.latest_when_empty = latest_when_empty
@@ -38,12 +41,13 @@ class ThreadStream:
             warnings.warn(
                 "[Threadstream.add_consumer] latest_when_empty=True has no effect with batched=True"
             )
-        self.batched = batched
 
-        if interval_time == 0:
-            kwargs = {"worker": self._callback_worker, "fn": consumer}
-        else:
-            kwargs = {"worker": self._consumer_worker, "fn": consumer, "interval_time": interval_time}
+        kwargs = {
+            "worker": self._consumer_worker,
+            "fn": consumer,
+            "interval_time": interval_time,
+            "batched": batched,
+        }
 
         self.start_worker(**kwargs)
 
@@ -62,28 +66,29 @@ class ThreadStream:
 
         print("[ThreadStream] Producer worker closed", flush=True)
 
-    def _consumer_worker(self, fn, interval_time) -> None:
+    def _consumer_worker(self, fn, interval_time, batched) -> None:
 
-        if self.batched:
+        if interval_time > 0 or batched:
+            # Interval time > 0 --> sleep takes care of timing of next iter
+            # Batched --> empty queue must not block
+            self.block_until_next = False
+        else:
+            self.block_until_next = True
+
+        if batched:
             getter = self.empty_q
         else:
             getter = self.get_next
 
         while not self.stop_event.is_set():
+            q_size = self.q.qsize()
+            if q_size > 0:
+                print(f"Q size: {q_size}")
             x = getter()
             fn(x)
             sleep(interval_time)
 
         print("[ThreadStream] Consumer worker closed", flush=True)
-
-    def _callback_worker(self, fn) -> None:
-
-        while not self.stop_event.is_set():
-            x = self.q.get(block=True)
-            fn(x)
-            self.q.task_done()
-
-        print("[ThreadStream] Callback worker closed", flush=True)
 
     def start_worker(self, worker, **kwargs):
         thr = threading.Thread(target=worker, kwargs=kwargs)
@@ -97,26 +102,36 @@ class ThreadStream:
     def get_next(self):
 
         try:
-            self.latest = self.q.get(block=False)
+            self.latest = self.q.get(block=self.block_until_next)
             self.q.task_done()
         except Empty:
             if not self.latest_when_empty:
                 return []
 
-        return self.latest
+        return [self.latest]
 
     def empty_q(self):
 
+        fresh = True
         empty = False
         records = []
+
         while not empty:
 
             try:
                 x = self.q.get(block=False)
                 records.append(x)
                 self.q.task_done()
+
             except Empty:
-                empty = True
+                if fresh:
+                    x = self.q.get(block=True)
+                    records.append(x)
+                    self.q.task_done()
+                else:
+                    empty = True
+
+            fresh = False
 
         return records
 
