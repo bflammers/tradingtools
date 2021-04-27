@@ -153,10 +153,10 @@ class CSVWriter(ThreadStream):
 
         if nested:
             self.add_consumer(
-                consumer=self.append_nested, interval_time=0, batched=False
+                consumer=self.append_nested, interval_time=0, batched=True
             )
         else:
-            self.add_consumer(consumer=self.append, interval_time=0, batched=False)
+            self.add_consumer(consumer=self.append, interval_time=0, batched=True)
 
     @staticmethod
     def _create_csv(path: Path, columns: list) -> None:

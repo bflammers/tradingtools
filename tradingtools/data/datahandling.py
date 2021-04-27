@@ -20,14 +20,17 @@ class ThreadStream:
     latest: list = []
     latest_when_empty: bool = False
     block_until_next: bool = False
+    debugging: bool = False
 
     def __init__(
         self,
         lifo: bool = True,
         latest_when_empty: bool = False,
         max_q_size: int = 100000,
+        debugging: bool = False
     ) -> None:
 
+        self.debugging = debugging
         self.latest_when_empty = latest_when_empty
 
         if lifo:
@@ -81,9 +84,12 @@ class ThreadStream:
             getter = self.get_next
 
         while not self.stop_event.is_set():
-            q_size = self.q.qsize()
-            if q_size > 0:
-                print(f"Q size: {q_size}")
+            
+            if self.debugging:
+                q_size = self.q.qsize()
+                if q_size > 0:
+                    print(f"Q size: {q_size}")
+                    
             x = getter()
             fn(x)
             sleep(interval_time)
