@@ -7,12 +7,12 @@ import numpy as np
 def judge_buy(
     history,
     ahead,
-    b_rate=0.003,
-    b_n_rate=190,
-    b_p_rate=0.3,
+    b_rate=0.001,
+    b_n_rate=240,
+    b_p_rate=0.85,
     b_neg_rate_allowed=0.001,
     b_n_incr_before=3,
-    b_n_incr_after=7,
+    b_n_incr_after=8,
 ):
 
     # Divide history into current price and actual history
@@ -37,9 +37,9 @@ def judge_buy(
 def judge_sell(
     history,
     ahead,
-    s_rate=0.003,
-    s_n_rate=190,
-    s_p_rate=0.3,
+    s_rate=0.02,
+    s_n_rate=240,
+    s_p_rate=0.2,
     s_pos_rate_allowed=0.001,
     s_n_decr_before=3,
     s_n_decr_after=7,
