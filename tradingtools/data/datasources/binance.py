@@ -57,14 +57,17 @@ def binance_collect(
     )
 
     logger.info("Add instruments")
+
+    # Get Binance instruments
     binance_info = Binance.info()
-    try:
-        all_pairs = binance_info["pairs"]
-    except KeyError:
-        all_pairs = binance_info["symbols"]
+    all_pairs = binance_info["symbols"]
+
+    # Find instruments that match pattern
     pairs = [pair for pair in all_pairs if re.findall(pairs_regex, pair)]
-    logger.info(f"{len(pairs)} instruments added")
+    
+    # Add instruments to feed
     feed.add_instruments(pairs)
+    logger.info(f"{len(pairs)} instruments added")
 
     logger.info(f"Running.... writing data to {results_dir}")
     feed.run()

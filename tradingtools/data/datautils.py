@@ -60,14 +60,14 @@ def create_results_dir(parent_dir: Path):
 
 
 def make_ticker_callback(fn: Callable[[Dict], None]) -> Callable:
-    async def ticker_callback(feed, pair, bid, ask, timestamp, receipt_timestamp):
+    async def ticker_callback(feed, symbol, bid, ask, timestamp, receipt_timestamp):
         write_time = time()
         fn(
             {
                 "feed": feed,
                 "timestamp": timestamp,
                 "receipt_timestamp": receipt_timestamp,
-                "pair": pair,
+                "pair": symbol,
                 "bid": bid,
                 "ask": ask,
                 "write_time": write_time,
@@ -79,7 +79,7 @@ def make_ticker_callback(fn: Callable[[Dict], None]) -> Callable:
 
 def make_trade_callback(fn: Callable[[Dict], None]) -> Callable:
     async def trade_callback(
-        feed, pair, order_id, timestamp, side, amount, price, receipt_timestamp
+        feed, symbol, order_id, timestamp, side, amount, price, receipt_timestamp
     ):
         write_time = time()
         fn(
@@ -87,7 +87,7 @@ def make_trade_callback(fn: Callable[[Dict], None]) -> Callable:
                 "feed": feed,
                 "timestamp": timestamp,
                 "receipt_timestamp": receipt_timestamp,
-                "pair": pair,
+                "pair": symbol,
                 "order_id": order_id,
                 "side": side,
                 "amount": amount,
