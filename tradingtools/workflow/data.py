@@ -1,5 +1,6 @@
 import re
 import multiprocessing
+import logging
 
 import pandas as pd
 import numpy as np
@@ -8,34 +9,35 @@ from pathlib import Path
 
 from tqdm.notebook import tqdm_notebook as tqdm
 
+logger = logging.getLogger(__name__)
+
 
 #### Dataloading
 
 
-def _load_and_add_to_dict(dir_name, dfs_dict, pairs=None):
+def _load_and_add_to_dict(file_name, dfs_dict, pairs=None):
 
     # Construct path
     if Path("./data/collected/binance").exists():
         binance_path = Path("data/collected/binance")
     else:
         binance_path = Path.cwd().parent / "data/collected/binance"
-    data_path = binance_path / dir_name
-    ticks_path = [p for p in data_path.glob("*") if re.findall("ticks", str(p))][0]
+    ticks_path = binance_path / file_name
 
     # Read data
     df = pd.read_csv(ticks_path)
-    print(f"{dir_name[:25]} - Total data shape: ", df.shape)
+    logger.info(f"{file_name} - Total data shape: {df.shape}")
 
     # Filter pairs
     if pairs is not None:
         df = df[df.pair.isin(pairs)]
-        print(f"{dir_name[:25]} - Pairs data shape: ", df.shape)
+        logger.info(f"{file_name} - Pairs data shape: {df.shape}")
 
     # Add which collection run this data was collected in, for removing overlap later
-    df["collection_run"] = dir_name
+    df["collection_run"] = file_name
 
     # Add to dict
-    dfs_dict[dir_name] = df
+    dfs_dict[file_name] = df
 
 
 def load_train_val_test(
@@ -62,28 +64,28 @@ def load_train_val_test(
 
         # Train data
         df_train = pd.concat([df for name, df in dfs.items() if name in train_dirs])
-        print(f"Train counts: \n{df_train.pair.value_counts()}")
+        logger.info(f"Train counts: \n{df_train.pair.value_counts()}")
         dups_train = df_train[["timestamp", "pair", "bid", "ask"]].duplicated()
         df_train = df_train[~dups_train]
-        print(f"-- train dropped duplicates: {dups_train.sum()}")
+        logger.info(f"-- train dropped duplicates: {dups_train.sum()}")
         result = (df_train,)
 
         # Validation data
         if val_dirs:
             df_val = pd.concat([df for name, df in dfs.items() if name in val_dirs])
-            print(f"Validation counts: \n{df_val.pair.value_counts()}")
+            logger.info(f"Validation counts: \n{df_val.pair.value_counts()}")
             dups_val = df_val[["timestamp", "pair", "bid", "ask"]].duplicated()
             df_val = df_val[~dups_val]
-            print(f"-- val dropped duplicates: {dups_train.sum()}")
+            logger.info(f"-- val dropped duplicates: {dups_train.sum()}")
             result += (df_val,)
 
         # Test data
         if test_dirs:
             df_test = pd.concat([df for name, df in dfs.items() if name in test_dirs])
-            print(f"Test counts: \n{df_test.pair.value_counts()}")
+            logger.info(f"Test counts: \n{df_test.pair.value_counts()}")
             dups_test = df_test[["timestamp", "pair", "bid", "ask"]].duplicated()
             df_test = df_test[~dups_test]
-            print(f"-- test dropped duplicates: {dups_test.sum()}")
+            logger.info(f"-- test dropped duplicates: {dups_test.sum()}")
             result += (df_test,)
 
     return result
@@ -108,7 +110,7 @@ def drop_overlapping(df):
 
             df = df[~overlapping]
 
-            print(f"{prev_dir_name} - Dropped {overlapping.sum()} rows due to overlap")
+            logger.info(f"{prev_dir_name} - Dropped {overlapping.sum()} rows due to overlap")
 
     return df.copy()
 
@@ -167,10 +169,17 @@ def blockify_data(x, n_history, n_ahead=0):
     return history, latest_idx, ahead
 
 
-def _print_drop(drop_col, reason):
-    n_drop = sum(drop_col)
-    drop_perc = round(n_drop / len(drop_col) * 100, 2)
-    print(f"-- Dropped {n_drop} rows ({drop_perc}%) because of {reason}")
+def _log_perc_affected(mask_affected, message, logging_type="INFO"):
+    n = sum(mask_affected)
+    perc = round(n / len(mask_affected) * 100, 2)
+    if logging_type == "INFO":
+        logger.info(f"-- {message} - affected {n} rows ({perc}%)")
+    elif logging_type == "WARNING":
+        logger.warning(f"-- {message} - affected {n} rows ({perc}%)")
+    elif logging_type == "ERROR":
+        logger.error(f"-- {message} - affected {n} rows ({perc}%)")
+    else:
+        raise Exception(f"logging_type {logging_type}, not one of [INFO, WARNING, ERROR]")
 
 
 def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit):
@@ -178,7 +187,7 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit):
     # Drop duplicate timestamps
     dup_timestamp = df_pair["timestamp"].duplicated()
     df_pair = df_pair[~dup_timestamp].copy()
-    _print_drop(dup_timestamp, "duplicate timestamps")
+    _log_perc_affected(dup_timestamp, "duplicate timestamps")
 
     # Sort by time
     df_pair = df_pair.sort_values("timestamp")
@@ -192,7 +201,7 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit):
 
     # Price column, resample to 1 second frames
     price = df_pair[price_col].copy()
-    price = price.resample("s").ffill(limit=ffill_limit)
+    price = price.resample("s").median().ffill(limit=ffill_limit)
 
     # Blockify
     history, latest_idx, ahead = blockify_data(price, n_history, n_ahead)
@@ -202,23 +211,23 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit):
     window_means = np.mean(history, axis=1)
     window_stds = np.std(history, axis=1)
 
+    # Set zero var standard deviations to 1 to prevent division by 0
+    zero_var = window_stds < 1e-15
+    window_stds[zero_var] = 1
+    _log_perc_affected(zero_var, "Not scaling zero variance windows")
+
     # Determine windows with zero variance
     # Determine windows with time gaps
-    zero_var = window_stds < 1e-15
-    time_gap = np.any(np.isnan(history), axis=1) | np.any(np.isnan(ahead), axis=1)
-    gaps = zero_var | time_gap
+    gaps = np.any(np.isnan(history), axis=1) | np.any(np.isnan(ahead), axis=1)
+    _log_perc_affected(gaps, "Dropping windows with timegaps")
 
-    # Drop zero variance and timegaps windows
+    # Drop timegaps windows
     original_price = original_price[~gaps]
     history = history[~gaps]
     latest_idx = latest_idx[~gaps]
     ahead = ahead[~gaps]
     window_means = window_means[~gaps]
     window_stds = window_stds[~gaps]
-
-    # Print
-    _print_drop(zero_var, "very small variance")
-    _print_drop(time_gap, "time gaps")
 
     # Standardize
     history -= window_means[:, None]
@@ -246,7 +255,10 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit):
     return df_price_pair, history, ahead
 
 
-def pre_process(df, n_history=600, n_ahead=240, price_col="bid", fill_limit=60):
+def pre_process(df, n_history=600, n_ahead=240, price_col="bid", ffill_limit=60):
+
+    if n_history < 50:
+        logger.warning(f"[pre-process] n_history argument is small ({n_history}), might lead to unstable standardization")
 
     price_dfs = []
     history_arrays = []
@@ -254,12 +266,16 @@ def pre_process(df, n_history=600, n_ahead=240, price_col="bid", fill_limit=60):
 
     for pair, df_pair in df.groupby("pair"):
 
-        # Print pair
-        print(f"Starting with: {pair}, shape: {df_pair.shape}")
+        # Log pair
+        logger.info(f"Starting with: {pair}, shape: {df_pair.shape}")
 
         # Pre process per pair
         price_pair, history_pair, ahead_pair = _pre_processing_pair(
-            df_pair, n_history, n_ahead, price_col, fill_limit
+            df_pair=df_pair, 
+            n_history=n_history, 
+            n_ahead=n_ahead, 
+            price_col=price_col, 
+            ffill_limit=ffill_limit
         )
 
         # Add coin to price pair dataframe
@@ -391,7 +407,38 @@ def create_features(price, chunk_idx, n_first_diff=10):
     return df_features
 
 
+def get_collection_paths(parent_dir="./data/collected/binance", max_parents=3):
+
+    cd = Path.cwd()
+    
+    for i in range(max_parents + 1):
+        
+        data_path = cd / parent_dir
+
+        if data_path.exists():
+            break
+
+        else: 
+            if i == max_parents:
+                raise Exception(f"Data path not found in latest parent: {cd}")
+
+            print(f"Data path not found in {cd}, going to parent")
+            cd = cd.parent
+
+    # List data directories
+    collection_paths = sorted(data_path.glob("*"))
+
+    return collection_paths
+
+
+
+
 if __name__ == "__main__":
+
+    paths = get_collection_paths()
+    print(paths)
+
+    exit()
 
     train_dirs = ["2021-04-03_235900_9f1b26c870364ee9ac41f4bbf522cb69"]
 
