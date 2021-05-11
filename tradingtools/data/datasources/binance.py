@@ -1,6 +1,9 @@
 import logging
 import re
 
+from itertools import product
+
+
 logger = logging.getLogger(__name__)
 
 import pandas as pd
@@ -25,7 +28,8 @@ def binance_collect(
     results_dir_path: Path = "./data/testing/",
     ticks=True,
     trades=True,
-    pairs_regex="-USDT|-BNB",
+    coin_symbols=["BTC", "ETH"],
+    base_symbols=["USDT", "BNB"]
 ):
 
     logger.info("Initializing new Datafeed")
@@ -63,7 +67,14 @@ def binance_collect(
     all_pairs = binance_info["symbols"]
 
     # Find instruments that match pattern
+    pairs_input = ["-".join(pair) for pair in product(coin_symbols, base_symbols)]
+    pairs_regex = "|".join(pairs_input)
     pairs = [pair for pair in all_pairs if re.findall(pairs_regex, pair)]
+    logger.info(f"Starting collection on Binance for pairs: {pairs}")
+
+    pairs_missing = set(pairs_input) - set(pairs)
+    if len(pairs) > 0:
+        logger.warning(f"Input pairs not available on binance: {pairs_missing}")
     
     # Add instruments to feed
     feed.add_instruments(pairs)
