@@ -5,6 +5,7 @@ import logging
 import pandas as pd
 import numpy as np
 
+from datetime import datetime
 from pathlib import Path
 
 from tqdm.notebook import tqdm_notebook as tqdm
@@ -15,80 +16,114 @@ logger = logging.getLogger(__name__)
 #### Dataloading
 
 
-def _load_and_add_to_dict(file_name, dfs_dict, pairs=None):
+class DataLoader:
+    def __init__(
+        self, parent_dir="./data/collected/binance", max_parents=3, n_pool=11
+    ) -> None:
+        self.paths = self.get_collection_paths(parent_dir, max_parents)
+        self.n_pool = n_pool
 
-    # Construct path
-    if Path("./data/collected/binance").exists():
-        binance_path = Path("data/collected/binance")
-    else:
-        binance_path = Path.cwd().parent / "data/collected/binance"
-    ticks_path = binance_path / file_name
+    @staticmethod
+    def get_collection_paths(parent_dir, max_parents=3):
 
-    # Read data
-    df = pd.read_csv(ticks_path)
-    logger.info(f"{file_name} - Total data shape: {df.shape}")
+        cd = Path.cwd()
 
-    # Filter pairs
-    if pairs is not None:
-        df = df[df.pair.isin(pairs)]
-        logger.info(f"{file_name} - Pairs data shape: {df.shape}")
+        for i in range(max_parents + 1):
 
-    # Add which collection run this data was collected in, for removing overlap later
-    df["collection_run"] = file_name
+            data_path = cd / parent_dir
 
-    # Add to dict
-    dfs_dict[file_name] = df
+            if data_path.exists():
+                logger.info(f"Data path found: {data_path}")
+                break
 
+            else:
+                if i == max_parents:
+                    raise Exception(f"Data path not found in latest parent: {cd}")
 
-def load_train_val_test(
-    train_dirs, val_dirs=None, test_dirs=None, pairs=["ETH-USDT"], n_pool=11
-):
+                logger.info(f"Data path not found in {cd}, going to parent")
+                cd = cd.parent
 
-    all_dirs = train_dirs
+        # List data directories
+        collection_paths = sorted(data_path.glob("*"))
 
-    if val_dirs:
-        all_dirs += val_dirs
+        return collection_paths
 
-    if test_dirs:
-        all_dirs += test_dirs
+    @staticmethod
+    def _load_and_add_to_dict(path, dfs_dict, pairs=None):
 
-    with multiprocessing.Manager() as manager:
+        # Read data
+        df = pd.read_csv(path)
+        logger.info(f"{path.name} - Total data shape: {df.shape}")
 
-        dfs = manager.dict()
+        # Filter pairs
+        if pairs is not None:
+            df = df[df.pair.isin(pairs)]
+            logger.info(f"{path.name} - Pairs data shape: {df.shape}")
 
-        n_dirs = len(all_dirs)
-        with multiprocessing.Pool(processes=min(n_dirs, n_pool)) as pool:
+        # Add which collection run this data was collected in, for removing overlap later
+        df["collection_run"] = path.name
 
-            args = zip(all_dirs, [dfs] * n_dirs, [pairs] * n_dirs)
-            pool.starmap(_load_and_add_to_dict, args)
+        # Add to dict
+        dfs_dict[path.name] = df
 
-        # Train data
-        df_train = pd.concat([df for name, df in dfs.items() if name in train_dirs])
-        logger.info(f"Train counts: \n{df_train.pair.value_counts()}")
-        dups_train = df_train[["timestamp", "pair", "bid", "ask"]].duplicated()
-        df_train = df_train[~dups_train]
-        logger.info(f"-- train dropped duplicates: {dups_train.sum()}")
-        result = (df_train,)
+    def load_paths(self, paths, pairs=None):
 
-        # Validation data
-        if val_dirs:
-            df_val = pd.concat([df for name, df in dfs.items() if name in val_dirs])
-            logger.info(f"Validation counts: \n{df_val.pair.value_counts()}")
-            dups_val = df_val[["timestamp", "pair", "bid", "ask"]].duplicated()
-            df_val = df_val[~dups_val]
-            logger.info(f"-- val dropped duplicates: {dups_train.sum()}")
-            result += (df_val,)
+        path_names = [p.name for p in paths]
+        if pairs:
+            logger.info(
+                f"Loading {len(pairs)} accross {len(paths)} paths -- pairs: {pairs} -- paths: {path_names}"
+            )
+        else:
+            logger.info(
+                f"Loading all pairs accross {len(paths)} paths -- paths: {path_names}"
+            )
 
-        # Test data
-        if test_dirs:
-            df_test = pd.concat([df for name, df in dfs.items() if name in test_dirs])
-            logger.info(f"Test counts: \n{df_test.pair.value_counts()}")
-            dups_test = df_test[["timestamp", "pair", "bid", "ask"]].duplicated()
-            df_test = df_test[~dups_test]
-            logger.info(f"-- test dropped duplicates: {dups_test.sum()}")
-            result += (df_test,)
+        with multiprocessing.Manager() as manager:
 
-    return result
+            dfs = manager.dict()
+
+            n_dirs = len(paths)
+            with multiprocessing.Pool(processes=min(n_dirs, self.n_pool)) as pool:
+
+                args = zip(paths, [dfs] * n_dirs, [pairs] * n_dirs)
+                pool.starmap(self._load_and_add_to_dict, args)
+
+            # Train data
+            df = pd.concat(dfs.values())
+            logger.info(f"Train counts: \n{df.pair.value_counts()}")
+            dups_train = df[["timestamp", "pair", "bid", "ask"]].duplicated()
+            df = df[~dups_train]
+            logger.info(f"-- train dropped duplicates: {dups_train.sum()}")
+
+        return df
+
+    def load_all(self, pairs=None):
+
+        return self.load_paths(self.paths, pairs)
+
+    def load_latest_n(self, n, pairs=None):
+        paths = self.paths[-n:]
+        return self.load_paths(paths, pairs)
+
+    def load_by_date(self, min_datetime=None, max_datetime=None, pairs=None):
+
+        # Select paths to load
+        paths = np.array(self.paths)
+        dates = np.array(
+            [datetime.strptime(p.name[:17], "%Y-%m-%d_%H%M%S") for p in paths]
+        )
+
+        if min_datetime is None and max_datetime is None:
+            logger.warning("No datetimes provided, loading everything")
+            self.load_all(pairs)
+
+        if min_datetime:
+            paths = paths[dates >= min_datetime]
+            
+        if max_datetime:
+            paths = paths[dates < max_datetime]
+
+        return self.load_paths(paths, pairs)
 
 
 #### Post-loading processing
@@ -110,7 +145,9 @@ def drop_overlapping(df):
 
             df = df[~overlapping]
 
-            logger.info(f"{prev_dir_name} - Dropped {overlapping.sum()} rows due to overlap")
+            logger.info(
+                f"{prev_dir_name} - Dropped {overlapping.sum()} rows due to overlap"
+            )
 
     return df.copy()
 
@@ -179,7 +216,9 @@ def _log_perc_affected(mask_affected, message, logging_type="INFO"):
     elif logging_type == "ERROR":
         logger.error(f"-- {message} - affected {n} rows ({perc}%)")
     else:
-        raise Exception(f"logging_type {logging_type}, not one of [INFO, WARNING, ERROR]")
+        raise Exception(
+            f"logging_type {logging_type}, not one of [INFO, WARNING, ERROR]"
+        )
 
 
 def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit):
@@ -201,7 +240,7 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit):
 
     # Price column, resample to 1 second frames
     price = df_pair[price_col].copy()
-    price = price.resample("s").median().ffill(limit=ffill_limit)
+    price = price.resample("s").ffill(limit=ffill_limit)
 
     # Blockify
     history, latest_idx, ahead = blockify_data(price, n_history, n_ahead)
@@ -258,7 +297,9 @@ def _pre_processing_pair(df_pair, n_history, n_ahead, price_col, ffill_limit):
 def pre_process(df, n_history=600, n_ahead=240, price_col="bid", ffill_limit=60):
 
     if n_history < 50:
-        logger.warning(f"[pre-process] n_history argument is small ({n_history}), might lead to unstable standardization")
+        logger.warning(
+            f"[pre-process] n_history argument is small ({n_history}), might lead to unstable standardization"
+        )
 
     price_dfs = []
     history_arrays = []
@@ -269,13 +310,17 @@ def pre_process(df, n_history=600, n_ahead=240, price_col="bid", ffill_limit=60)
         # Log pair
         logger.info(f"Starting with: {pair}, shape: {df_pair.shape}")
 
+        if df_pair.shape[0] < n_history + n_ahead:
+            logger.warning(f"-- Only {df_pair.shape[0]} rows, skipping {pair}")
+            continue
+
         # Pre process per pair
         price_pair, history_pair, ahead_pair = _pre_processing_pair(
-            df_pair=df_pair, 
-            n_history=n_history, 
-            n_ahead=n_ahead, 
-            price_col=price_col, 
-            ffill_limit=ffill_limit
+            df_pair=df_pair,
+            n_history=n_history,
+            n_ahead=n_ahead,
+            price_col=price_col,
+            ffill_limit=ffill_limit,
         )
 
         # Add coin to price pair dataframe
@@ -405,32 +450,6 @@ def create_features(price, chunk_idx, n_first_diff=10):
     df_features = df_features.drop(columns=[f"bid_mean_0_120"])
 
     return df_features
-
-
-def get_collection_paths(parent_dir="./data/collected/binance", max_parents=3):
-
-    cd = Path.cwd()
-    
-    for i in range(max_parents + 1):
-        
-        data_path = cd / parent_dir
-
-        if data_path.exists():
-            break
-
-        else: 
-            if i == max_parents:
-                raise Exception(f"Data path not found in latest parent: {cd}")
-
-            print(f"Data path not found in {cd}, going to parent")
-            cd = cd.parent
-
-    # List data directories
-    collection_paths = sorted(data_path.glob("*"))
-
-    return collection_paths
-
-
 
 
 if __name__ == "__main__":
