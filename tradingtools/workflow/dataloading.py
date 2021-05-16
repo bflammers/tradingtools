@@ -100,13 +100,13 @@ class DataLoader:
 
         # Reading initial file"
         logger.info(f"Reading first file: {paths[0]}")
-        df_curr = pd.read_csv(paths[0], nrows=1000)
+        df_curr = pd.read_csv(paths[0])
 
         for i, path in enumerate(paths[1:]):
             
             # Load next data file and append
             logger.info(f"Reading next file ({i + 1}/{len(paths)}): {path}")
-            df_next = pd.read_csv(path, nrows=1000)
+            df_next = pd.read_csv(path)
             df = pd.concat([df_curr, df_next.head(n_next_append)])
 
             # Filter pairs
