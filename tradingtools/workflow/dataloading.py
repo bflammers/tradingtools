@@ -1,4 +1,3 @@
-
 import multiprocessing
 import logging
 
@@ -13,6 +12,31 @@ from tqdm.notebook import tqdm_notebook as tqdm
 logger = logging.getLogger(__name__)
 
 
+def get_collection_paths(parent_dir, max_parents=3):
+
+    cd = Path.cwd()
+
+    for i in range(max_parents + 1):
+
+        data_path = cd / parent_dir
+
+        if data_path.exists():
+            logger.info(f"Data path found: {data_path}")
+            break
+
+        else:
+            if i == max_parents:
+                raise Exception(f"Data path not found in latest parent: {cd}")
+
+            logger.info(f"Data path not found in {cd}, going to parent")
+            cd = cd.parent
+
+    # List data directories
+    collection_paths = sorted(data_path.glob("*"))
+
+    return collection_paths
+
+
 #### Dataloading
 
 
@@ -20,33 +44,8 @@ class DataLoader:
     def __init__(
         self, parent_dir="./data/collected/binance", max_parents=3, n_pool=11
     ) -> None:
-        self.paths = self.get_collection_paths(parent_dir, max_parents)
+        self.paths = get_collection_paths(parent_dir, max_parents)
         self.n_pool = n_pool
-
-    @staticmethod
-    def get_collection_paths(parent_dir, max_parents=3):
-
-        cd = Path.cwd()
-
-        for i in range(max_parents + 1):
-
-            data_path = cd / parent_dir
-
-            if data_path.exists():
-                logger.info(f"Data path found: {data_path}")
-                break
-
-            else:
-                if i == max_parents:
-                    raise Exception(f"Data path not found in latest parent: {cd}")
-
-                logger.info(f"Data path not found in {cd}, going to parent")
-                cd = cd.parent
-
-        # List data directories
-        collection_paths = sorted(data_path.glob("*"))
-
-        return collection_paths
 
     @staticmethod
     def _load_and_add_to_dict(path, dfs_dict, pairs=None):
@@ -97,15 +96,51 @@ class DataLoader:
 
         return df
 
-    def load_all(self, pairs=None):
+    def load_iterative(self, paths, pairs=None, n_next_append=1000):
 
+        # Reading initial file"
+        logger.info(f"Reading first file: {paths[0]}")
+        df_curr = pd.read_csv(paths[0], nrows=1000)
+
+        for i, path in enumerate(paths[1:]):
+            
+            # Load next data file and append
+            logger.info(f"Reading next file ({i + 1}/{len(paths)}): {path}")
+            df_next = pd.read_csv(path, nrows=1000)
+            df = pd.concat([df_curr, df_next.head(n_next_append)])
+
+            # Filter pairs
+            if pairs is not None:
+                df = df[df["pair"].isin(pairs)]
+                logger.info(f"{path.name} - pairs data shape: {df.shape}")
+                                
+            # Dropping duplicates
+            dups = df[["timestamp", "pair", "bid", "ask"]].duplicated()
+            if any(dups):
+                logger.info(f"Dropping {sum(dups)} duplicates")
+                df = df[~dups]
+
+            # Set current data file 
+            df_curr = df_next.copy()
+
+            yield df
+
+    def load_all(self, pairs=None, iterator=False):
+
+        if iterator:
+            return self.load_iterative(self.paths, pairs)
+        
         return self.load_paths(self.paths, pairs)
 
-    def load_latest_n(self, n, pairs=None):
-        paths = self.paths[-n:]
+    def load_latest_n(self, n, pairs=None, iterator=False):
+        paths = self.paths[-(n + 1):]
+
+        if iterator:
+            return self.load_iterative(paths, pairs)
+        
         return self.load_paths(paths, pairs)
 
-    def load_by_date(self, min_datetime=None, max_datetime=None, pairs=None):
+    def load_by_date(self, min_datetime=None, max_datetime=None, pairs=None, iterator=False):
 
         # Select paths to load
         paths = np.array(self.paths)
@@ -119,39 +154,14 @@ class DataLoader:
 
         if min_datetime:
             paths = paths[dates >= min_datetime]
-            
+
         if max_datetime:
             paths = paths[dates < max_datetime]
 
+        if iterator:
+            return self.load_iterative(paths, pairs)
+        
         return self.load_paths(paths, pairs)
-
-
-#### Post-loading processing
-
-
-def drop_overlapping(df):
-
-    min_times = df.groupby("collection_run")["write_datetime"].min().sort_index()
-    max_times = df.groupby("collection_run")["write_datetime"].max().sort_index()
-
-    for prev_idx, min_time in enumerate(min_times[1:]):
-
-        if max_times[prev_idx] > min_time:
-
-            prev_dir_name = min_times.index[prev_idx]
-
-            subseq_run = df.collection_run == prev_dir_name
-            overlapping = subseq_run & (df.write_time > min_time.timestamp())
-
-            df = df[~overlapping]
-
-            logger.info(
-                f"{prev_dir_name} - Dropped {overlapping.sum()} rows due to overlap"
-            )
-
-    return df.copy()
-
-
 
 
 if __name__ == "__main__":
