@@ -37,35 +37,41 @@ def get_collection_paths(parent_dir, max_parents=3):
     return collection_paths
 
 
-#### Dataloading
-
-
 class DataLoader:
     def __init__(
-        self, parent_dir="./data/collected/binance", max_parents=3, n_pool=11
+        self,
+        parent_dir="./data/collected/binance",
+        max_parents=3,
+        n_pool=11,
+        debug=False,
     ) -> None:
         self.paths = get_collection_paths(parent_dir, max_parents)
         self.n_pool = n_pool
+        self.debug = debug
+        self.read_csv_kwargs = dict()
+
+        if debug:
+            self.read_csv_kwargs = {
+                "nrows": 500000
+            }
 
     @staticmethod
-    def _load_and_add_to_dict(path, dfs_dict, pairs=None):
-
-        # Read data
-        df = pd.read_csv(path)
-        logger.info(f"{path.name} - Total data shape: {df.shape}")
+    def _filter_pairs_duplicates(df, pairs=None):
 
         # Filter pairs
         if pairs is not None:
-            df = df[df.pair.isin(pairs)]
-            logger.info(f"{path.name} - Pairs data shape: {df.shape}")
+            df = df[df["pair"].isin(pairs)]
 
-        # Add which collection run this data was collected in, for removing overlap later
-        df["collection_run"] = path.name
+        # Dropping duplicates
+        dups = df[["timestamp", "pair", "bid", "ask"]].duplicated()
+        if any(dups):
+            logger.info(f"Dropping {sum(dups)} duplicates")
+            df = df[~dups]
 
-        # Add to dict
-        dfs_dict[path.name] = df
+        return df
 
-    def load_paths(self, paths, pairs=None):
+    @staticmethod
+    def _log_paths_pairs(paths, pairs=None):
 
         path_names = [p.name for p in paths]
         if pairs:
@@ -76,6 +82,27 @@ class DataLoader:
             logger.info(
                 f"Loading all pairs accross {len(paths)} paths -- paths: {path_names}"
             )
+
+    def _load_and_add_to_dict(self, path, dfs_dict, pairs=None):
+
+        # Read data
+        df = pd.read_csv(path, self.read_csv_kwargs)
+        logger.info(f"{path.name} - Total data shape: {df.shape}")
+
+        # Filter pairs
+        df = self._filter_pairs_duplicates(df, pairs)
+        logger.info(f"{path.name} - Pairs data shape: {df.shape}")
+
+        # Add which collection run this data was collected in, for removing overlap later
+        df["collection_run"] = path.name
+
+        # Add to dict
+        dfs_dict[path.name] = df
+
+    def load_paths(self, paths, pairs=None):
+
+        # Log total paths and pairs
+        self._log_paths_pairs(paths, pairs)
 
         with multiprocessing.Manager() as manager:
 
@@ -98,49 +125,50 @@ class DataLoader:
 
     def load_iterative(self, paths, pairs=None, n_next_append=1000):
 
+        # Log total paths and pairs
+        self._log_paths_pairs(paths, pairs)
+
         # Reading initial file"
-        logger.info(f"Reading first file: {paths[0]}")
-        df_curr = pd.read_csv(paths[0])
+        logger.info(f"Reading initial file (1/{len(paths)}): {paths[0].name}")
+        df_curr = pd.read_csv(paths[0], **self.read_csv_kwargs)
 
         for i, path in enumerate(paths[1:]):
-            
+
             # Load next data file and append
-            logger.info(f"Reading next file ({i + 1}/{len(paths)}): {path}")
-            df_next = pd.read_csv(path)
+            logger.info(f"Reading next file ({i + 2}/{len(paths)}): {path.name}")
+            df_next = pd.read_csv(path, **self.read_csv_kwargs)
             df = pd.concat([df_curr, df_next.head(n_next_append)])
 
-            # Filter pairs
-            if pairs is not None:
-                df = df[df["pair"].isin(pairs)]
-                logger.info(f"{path.name} - pairs data shape: {df.shape}")
-                                
-            # Dropping duplicates
-            dups = df[["timestamp", "pair", "bid", "ask"]].duplicated()
-            if any(dups):
-                logger.info(f"Dropping {sum(dups)} duplicates")
-                df = df[~dups]
+            # Filter not-selected pairs and duplicates
+            df = self._filter_pairs_duplicates(df, pairs)
 
-            # Set current data file 
+            # Set current data file
             df_curr = df_next.copy()
 
             yield df
+
+        df_curr = self._filter_pairs_duplicates(df_curr, pairs)
+        logger.info(f"Yielding last file (without head of next one appended)")
+
+        yield df_curr
 
     def load_all(self, pairs=None, iterator=False):
 
         if iterator:
             return self.load_iterative(self.paths, pairs)
-        
+
         return self.load_paths(self.paths, pairs)
 
     def load_latest_n(self, n, pairs=None, iterator=False):
-        paths = self.paths[-(n + 1):]
+        paths = self.paths[-n:]
 
         if iterator:
             return self.load_iterative(paths, pairs)
-        
         return self.load_paths(paths, pairs)
 
-    def load_by_date(self, min_datetime=None, max_datetime=None, pairs=None, iterator=False):
+    def load_by_date(
+        self, min_datetime=None, max_datetime=None, pairs=None, iterator=False
+    ):
 
         # Select paths to load
         paths = np.array(self.paths)
@@ -160,7 +188,7 @@ class DataLoader:
 
         if iterator:
             return self.load_iterative(paths, pairs)
-        
+
         return self.load_paths(paths, pairs)
 
 

@@ -13,6 +13,9 @@ def get_rolling_block(x, window_size, same_size=False, center=False):
     len_decrease = window_size - 1
     out_shape = (len(x) - len_decrease, window_size)
 
+    assert out_shape[0] > 0, f"Dimensions mismatch --> x length: {len(x)}, window_size: {window_size}"
+    assert out_shape[1] > 0, f"Dimensions mismatch --> x length: {len(x)}, window_size: {window_size}"
+
     # Stride tricks for getting rolling window effect
     # https://stackoverflow.com/a/47483615/4909087
     # https://stackoverflow.com/a/46199050/4800652
@@ -37,10 +40,12 @@ def get_rolling_block(x, window_size, same_size=False, center=False):
     return out
 
 
-def _log_perc_affected(mask_affected, message, logging_type="INFO"):
+def _log_perc_affected(mask_affected, message, logging_type="DEBUG"):
     n = sum(mask_affected)
     perc = round(n / len(mask_affected) * 100, 2)
-    if logging_type == "INFO":
+    if logging_type == "DEBUG":
+        logger.debug(f"{message} - affected {n} rows ({perc}%)")
+    elif logging_type == "INFO":
         logger.info(f"{message} - affected {n} rows ({perc}%)")
     elif logging_type == "WARNING":
         logger.warning(f"{message} - affected {n} rows ({perc}%)")
@@ -99,6 +104,8 @@ class PreProcessor:
 
     def _pre_processing_pair(self, pair, df_pair):
 
+        logger.debug(f"Starting pre-processing for {pair}...")
+
         # Drop duplicate timestamps
         dup_timestamp = df_pair["timestamp"].duplicated()
         df_pair = df_pair[~dup_timestamp].copy()
@@ -117,6 +124,11 @@ class PreProcessor:
         # Price column, resample to 1 second frames
         price = df_pair[self.price_col].copy()
         price = price.resample("s").ffill(limit=self.ffill_limit)
+
+        # Check if dimensions are fine, otherwise return None
+        if len(price) <= self.n_history + self.n_ahead:
+            logger.warning(f"Too few data points for {pair}, length price: {len(price)}")
+            return None
 
         # Blockify
         history, latest_idx, ahead = self.blockify_data(
@@ -174,24 +186,30 @@ class PreProcessor:
     def _pre_process_pair_wrapper(self, pair, df_pair):
 
         # Log pair
-        logger.info(f"[{pair}] shape: {df_pair.shape}")
+        logger.debug(f"[{pair}] shape: {df_pair.shape}")
 
         if df_pair.shape[0] < self.n_history + self.n_ahead:
             logger.warning(f"[{pair}] Only {df_pair.shape[0]} rows, skipping {pair}")
             return
 
         # Pre process per pair
-        price_pair, history_pair, ahead_pair = self._pre_processing_pair(
+        price_history_ahead = self._pre_processing_pair(
             pair=pair, df_pair=df_pair
         )
 
-        # Add pair to dataframe
-        price_pair["pair"] = pair
+        # self._pre_processing_pair returns None if there are to few data points for
+        # pre-processing
+        if price_history_ahead is not None:
 
-        # Add to multiprocessing dicts
-        self.price_dfs[pair] = price_pair
-        self.history_arrays[pair] = history_pair
-        self.ahead_arrays[pair] = ahead_pair
+            price_pair, history_pair, ahead_pair = price_history_ahead
+
+            # Add pair to dataframe
+            price_pair["pair"] = pair
+
+            # Add to multiprocessing dicts
+            self.price_dfs[pair] = price_pair
+            self.history_arrays[pair] = history_pair
+            self.ahead_arrays[pair] = ahead_pair
 
     def pre_process(self, df):
 
