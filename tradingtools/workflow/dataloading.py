@@ -51,9 +51,7 @@ class DataLoader:
         self.read_csv_kwargs = dict()
 
         if debug:
-            self.read_csv_kwargs = {
-                "nrows": 500000
-            }
+            self.read_csv_kwargs = {"nrows": 500000}
 
     @staticmethod
     def _filter_pairs_duplicates(df, pairs=None):
@@ -86,7 +84,7 @@ class DataLoader:
     def _load_and_add_to_dict(self, path, dfs_dict, pairs=None):
 
         # Read data
-        df = pd.read_csv(path, self.read_csv_kwargs)
+        df = pd.read_csv(path, **self.read_csv_kwargs)
         logger.info(f"{path.name} - Total data shape: {df.shape}")
 
         # Filter pairs
@@ -99,31 +97,50 @@ class DataLoader:
         # Add to dict
         dfs_dict[path.name] = df
 
-    def load_paths(self, paths, pairs=None):
+    def load_paths(self, paths, pairs):
 
         # Log total paths and pairs
         self._log_paths_pairs(paths, pairs)
 
-        with multiprocessing.Manager() as manager:
+        if self.debug:
 
-            dfs = manager.dict()
+            dfs = dict()
 
-            n_dirs = len(paths)
-            with multiprocessing.Pool(processes=min(n_dirs, self.n_pool)) as pool:
+            logger.info("debug=True, running single threaded")
+            for path in paths:
+                self._load_and_add_to_dict(path, dfs, pairs)
 
-                args = zip(paths, [dfs] * n_dirs, [pairs] * n_dirs)
-                pool.starmap(self._load_and_add_to_dict, args)
-
-            # Train data
+            # Concat separate dfs
             df = pd.concat(dfs.values())
-            logger.info(f"Train counts: \n{df.pair.value_counts()}")
-            dups_train = df[["timestamp", "pair", "bid", "ask"]].duplicated()
-            df = df[~dups_train]
-            logger.info(f"-- train dropped duplicates: {dups_train.sum()}")
+
+        else:
+
+            with multiprocessing.Manager() as manager:
+
+                dfs = manager.dict()
+
+                n_dirs = len(paths)
+                with multiprocessing.Pool(processes=min(n_dirs, self.n_pool)) as pool:
+
+                    args = zip(paths, [dfs] * n_dirs, [pairs] * n_dirs)
+                    pool.starmap(self._load_and_add_to_dict, args)
+
+                    # Concat separate dfs
+                    df = pd.concat(dfs.values())
+
+        # Log value counts
+        logger.info(f"Train counts: \n{df.pair.value_counts()}")
+
+        # Drop duplicates
+        dups_train = df[["timestamp", "pair", "bid", "ask"]].duplicated()
+        df = df[~dups_train]
+        logger.info(f"-- train dropped duplicates: {dups_train.sum()}")
 
         return df
 
-    def load_iterative(self, paths, pairs=None, n_next_append=1000):
+    def load_iterative(
+        self, paths, pairs, n_next_append=1000
+    ):
 
         # Log total paths and pairs
         self._log_paths_pairs(paths, pairs)
@@ -152,22 +169,29 @@ class DataLoader:
 
         yield df_curr
 
-    def load_all(self, pairs=None, iterator=False):
+    def load_all(self, pairs=["BTC-USDT", "XRP-BNB"], iterator=False):
 
         if iterator:
             return self.load_iterative(self.paths, pairs)
 
         return self.load_paths(self.paths, pairs)
 
-    def load_latest_n(self, n, pairs=None, iterator=False):
+    def load_latest_n(self, n, pairs=["BTC-USDT", "XRP-BNB"], iterator=False):
+
+        # Select the n latest paths
         paths = self.paths[-n:]
 
         if iterator:
             return self.load_iterative(paths, pairs)
+
         return self.load_paths(paths, pairs)
 
     def load_by_date(
-        self, min_datetime=None, max_datetime=None, pairs=None, iterator=False
+        self,
+        min_datetime=None,
+        max_datetime=None,
+        pairs=["BTC-USDT", "XRP-BNB"],
+        iterator=False,
     ):
 
         # Select paths to load
@@ -194,4 +218,5 @@ class DataLoader:
 
 if __name__ == "__main__":
 
-    pass
+    dl = DataLoader(debug=False)
+    train_data = dl.load_latest_n(15)
