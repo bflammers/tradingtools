@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from tqdm.notebook import tqdm_notebook as tqdm
+from tradingtools.data.datautils import threadsafe_generator
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +42,22 @@ class DataLoader:
     def __init__(
         self,
         parent_dir="./data/collected/binance",
+        pairs=None,
         max_parents=3,
         n_pool=11,
         debug=False,
     ) -> None:
         self.paths = get_collection_paths(parent_dir, max_parents)
+        self.pairs = pairs
         self.n_pool = n_pool
         self.debug = debug
         self.read_csv_kwargs = dict()
 
         if debug:
-            self.read_csv_kwargs = {"nrows": 500000}
+            self.read_csv_kwargs = {"nrows": 1000000}
+
+            if pairs is None:
+                self.pairs=["BTC-USDT", "ETH-USDT", "XRP-BNB", "ADA-BNB"]
 
     @staticmethod
     def _filter_pairs_duplicates(df, pairs=None):
@@ -81,14 +87,14 @@ class DataLoader:
                 f"Loading all pairs accross {len(paths)} paths -- paths: {path_names}"
             )
 
-    def _load_and_add_to_dict(self, path, dfs_dict, pairs=None):
+    def _load_and_add_to_dict(self, path, dfs_dict):
 
         # Read data
         df = pd.read_csv(path, **self.read_csv_kwargs)
         logger.info(f"{path.name} - Total data shape: {df.shape}")
 
         # Filter pairs
-        df = self._filter_pairs_duplicates(df, pairs)
+        df = self._filter_pairs_duplicates(df, self.pairs)
         logger.info(f"{path.name} - Pairs data shape: {df.shape}")
 
         # Add which collection run this data was collected in, for removing overlap later
@@ -97,10 +103,10 @@ class DataLoader:
         # Add to dict
         dfs_dict[path.name] = df
 
-    def load_paths(self, paths, pairs):
+    def load_paths(self, paths):
 
         # Log total paths and pairs
-        self._log_paths_pairs(paths, pairs)
+        self._log_paths_pairs(paths, self.pairs)
 
         if self.debug:
 
@@ -108,7 +114,7 @@ class DataLoader:
 
             logger.info("debug=True, running single threaded")
             for path in paths:
-                self._load_and_add_to_dict(path, dfs, pairs)
+                self._load_and_add_to_dict(path, dfs)
 
             # Concat separate dfs
             df = pd.concat(dfs.values())
@@ -122,7 +128,7 @@ class DataLoader:
                 n_dirs = len(paths)
                 with multiprocessing.Pool(processes=min(n_dirs, self.n_pool)) as pool:
 
-                    args = zip(paths, [dfs] * n_dirs, [pairs] * n_dirs)
+                    args = zip(paths, [dfs] * n_dirs)
                     pool.starmap(self._load_and_add_to_dict, args)
 
                     # Concat separate dfs
@@ -138,12 +144,11 @@ class DataLoader:
 
         return df
 
-    def load_iterative(
-        self, paths, pairs, n_next_append=1000
-    ):
+    @threadsafe_generator
+    def load_iterative(self, paths, n_next_append=1000):
 
         # Log total paths and pairs
-        self._log_paths_pairs(paths, pairs)
+        self._log_paths_pairs(paths, self.pairs)
 
         # Reading initial file"
         logger.info(f"Reading initial file (1/{len(paths)}): {paths[0].name}")
@@ -157,40 +162,39 @@ class DataLoader:
             df = pd.concat([df_curr, df_next.head(n_next_append)])
 
             # Filter not-selected pairs and duplicates
-            df = self._filter_pairs_duplicates(df, pairs)
+            df = self._filter_pairs_duplicates(df, self.pairs)
 
             # Set current data file
             df_curr = df_next.copy()
 
             yield df
 
-        df_curr = self._filter_pairs_duplicates(df_curr, pairs)
+        df_curr = self._filter_pairs_duplicates(df_curr, self.pairs)
         logger.info(f"Yielding last file (without head of next one appended)")
 
         yield df_curr
 
-    def load_all(self, pairs=["BTC-USDT", "XRP-BNB"], iterator=False):
+    def load_all(self, iterator=False):
 
         if iterator:
-            return self.load_iterative(self.paths, pairs)
+            return self.load_iterative(self.paths)
 
-        return self.load_paths(self.paths, pairs)
+        return self.load_paths(self.paths)
 
-    def load_latest_n(self, n, pairs=["BTC-USDT", "XRP-BNB"], iterator=False):
+    def load_latest_n(self, n, iterator=False):
 
         # Select the n latest paths
         paths = self.paths[-n:]
 
         if iterator:
-            return self.load_iterative(paths, pairs)
+            return self.load_iterative(paths)
 
-        return self.load_paths(paths, pairs)
+        return self.load_paths(paths)
 
     def load_by_date(
         self,
         min_datetime=None,
         max_datetime=None,
-        pairs=["BTC-USDT", "XRP-BNB"],
         iterator=False,
     ):
 
@@ -202,7 +206,7 @@ class DataLoader:
 
         if min_datetime is None and max_datetime is None:
             logger.warning("No datetimes provided, loading everything")
-            self.load_all(pairs)
+            return self.load_all(iterator=iterator)
 
         if min_datetime:
             paths = paths[dates >= min_datetime]
@@ -211,12 +215,13 @@ class DataLoader:
             paths = paths[dates < max_datetime]
 
         if iterator:
-            return self.load_iterative(paths, pairs)
+            return self.load_iterative(paths)
 
-        return self.load_paths(paths, pairs)
+        return self.load_paths(paths)
 
 
 if __name__ == "__main__":
 
-    dl = DataLoader(debug=False)
-    train_data = dl.load_latest_n(15)
+    dl = DataLoader(debug=True)
+    train_data = dl.load_latest_n(5)
+    print(train_data)

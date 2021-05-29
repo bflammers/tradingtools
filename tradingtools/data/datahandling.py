@@ -4,7 +4,7 @@ import pandas as pd
 
 from time import sleep
 from queue import Queue, LifoQueue, Empty
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 try:
     from ..utils import warnings
@@ -21,6 +21,7 @@ class ThreadStream:
     latest_when_empty: bool = False
     block_until_next: bool = False
     debugging: bool = False
+    threads: List[threading.Thread] = []
 
     def __init__(
         self,
@@ -55,7 +56,10 @@ class ThreadStream:
         self.start_worker(**kwargs)
 
     def add_producer(self, producer, interval_time: int = 0):
-        self.latest = producer()
+
+        if self.latest_when_empty:
+            self.latest = producer()
+            
         self.start_worker(
             worker=self._producer_worker, fn=producer, interval_time=interval_time
         )
@@ -100,7 +104,10 @@ class ThreadStream:
         thr = threading.Thread(target=worker, kwargs=kwargs)
         thr.daemon = True
         thr.start()
-        self.worker_running = True
+        self.threads.append(thr)
+
+    def terminate(self):
+        self.stop_event.set()
 
     def add_to_q(self, item):
         self.q.put(item=item, block=False)

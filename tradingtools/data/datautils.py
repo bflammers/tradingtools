@@ -6,7 +6,7 @@ import pandas as pd
 from uuid import uuid4
 from pathlib import Path
 from time import sleep, time
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Generator, Iterator
 
 try:
     from ..utils import warnings
@@ -141,7 +141,6 @@ def threadsafe_generator(f):
         return ThreadSafeIterator(f(*a, **kw))
 
     return g
-
 
 class CSVWriter(ThreadStream):
     def __init__(self, path: Path, columns: list, nested: bool = False) -> None:
