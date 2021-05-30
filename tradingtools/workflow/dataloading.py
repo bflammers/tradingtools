@@ -57,7 +57,7 @@ class DataLoader:
             self.read_csv_kwargs = {"nrows": 1000000}
 
             if pairs is None:
-                self.pairs=["BTC-USDT", "ETH-USDT", "XRP-BNB", "ADA-BNB"]
+                self.pairs = ["BTC-USDT", "ETH-USDT", "XRP-BNB", "ADA-BNB"]
 
     @staticmethod
     def _filter_pairs_duplicates(df, pairs=None):
@@ -86,6 +86,16 @@ class DataLoader:
             logger.info(
                 f"Loading all pairs accross {len(paths)} paths -- paths: {path_names}"
             )
+
+    def exclude_by_date(self, exclude_dates):
+        before = set(self.paths)
+        self.paths = [
+            p
+            for p in self.paths
+            if self.parse_datetime_path(p).date() not in exclude_dates
+        ]
+        logger.warning(f"Excluded paths: {sorted(list(before - set(self.paths)))}")
+
 
     def _load_and_add_to_dict(self, path, dfs_dict):
 
@@ -143,6 +153,10 @@ class DataLoader:
         logger.info(f"-- train dropped duplicates: {dups_train.sum()}")
 
         return df
+
+    @staticmethod
+    def parse_datetime_path(path):
+        return datetime.strptime(path.name[:17], "%Y-%m-%d_%H%M%S")
 
     @threadsafe_generator
     def load_iterative(self, paths, n_next_append=1000):
