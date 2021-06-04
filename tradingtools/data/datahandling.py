@@ -1,5 +1,8 @@
 import threading
+import logging
+import atexit
 
+import multiprocessing as mp
 import pandas as pd
 
 from time import sleep
@@ -13,65 +16,46 @@ except ImportError:
     from tradingtools.utils import warnings
     from tradingtools.utils import timestamp_to_string
 
+logger = logging.getLogger(__name__)
 
-class ThreadStream:
-    q: Queue
-    stop_event: threading.Event = threading.Event()
-    latest: list = []
-    latest_when_empty: bool = False
+
+class Stream:
     block_until_next: bool = False
     debugging: bool = False
-    threads: List[threading.Thread] = []
+    workers: List = []
+    q = None
+    stop_event = None
 
-    def __init__(
-        self,
-        lifo: bool = True,
-        latest_when_empty: bool = False,
-        max_q_size: int = 100000,
-        debugging: bool = False
-    ) -> None:
+    def __init__(self, debugging: bool = False) -> None:
 
         self.debugging = debugging
-        self.latest_when_empty = latest_when_empty
-
-        if lifo:
-            self.q = LifoQueue(maxsize=max_q_size)
-        else:
-            self.q = Queue(maxsize=max_q_size)
+        atexit.register(self.terminate)
 
     def add_consumer(self, consumer, interval_time: int = 0, batched: bool = False):
 
-        if batched and self.latest_when_empty:
-            warnings.warn(
-                "[Threadstream.add_consumer] latest_when_empty=True has no effect with batched=True"
-            )
-
-        kwargs = {
-            "worker": self._consumer_worker,
-            "fn": consumer,
-            "interval_time": interval_time,
-            "batched": batched,
-        }
-
-        self.start_worker(**kwargs)
+        self.start_worker(
+            worker=self._consumer_worker,
+            fn=consumer,
+            interval_time=interval_time,
+            batched=batched,
+        )
 
     def add_producer(self, producer, interval_time: int = 0):
 
-        if self.latest_when_empty:
-            self.latest = producer()
-            
         self.start_worker(
             worker=self._producer_worker, fn=producer, interval_time=interval_time
         )
 
     def _producer_worker(self, fn, interval_time) -> None:
 
+        logger.info("Producer worker starting")
+
         while not self.stop_event.is_set():
             x = fn()
             self.q.put(x)
             sleep(interval_time)
 
-        print("[ThreadStream] Producer worker closed", flush=True)
+        logger.info("Producer worker closed")
 
     def _consumer_worker(self, fn, interval_time, batched) -> None:
 
@@ -80,6 +64,7 @@ class ThreadStream:
             # Batched --> empty queue must not block
             self.block_until_next = False
         else:
+            # Items are processed the moment they come in
             self.block_until_next = True
 
         if batched:
@@ -87,41 +72,41 @@ class ThreadStream:
         else:
             getter = self.get_next
 
+        logger.info("Consumer worker starting")
+
         while not self.stop_event.is_set():
-            
+
             if self.debugging:
                 q_size = self.q.qsize()
                 if q_size > 0:
-                    print(f"Q size: {q_size}")
-                    
+                    logger.debug(f"Q size: {q_size}")
+
             x = getter()
             fn(x)
             sleep(interval_time)
 
-        print("[ThreadStream] Consumer worker closed", flush=True)
+        logger.info("Consumer worker closed")
 
     def start_worker(self, worker, **kwargs):
-        thr = threading.Thread(target=worker, kwargs=kwargs)
-        thr.daemon = True
-        thr.start()
-        self.threads.append(thr)
+        raise NotImplementedError
 
     def terminate(self):
         self.stop_event.set()
 
+        for worker in self.workers:
+            
+            try:
+                worker.terminate()
+            except AttributeError:
+                pass 
+
+            worker.join()
+
     def add_to_q(self, item):
-        self.q.put(item=item, block=False)
+        self.q.put(item, block=False)
 
-    def get_next(self):
-
-        try:
-            self.latest = self.q.get(block=self.block_until_next)
-            self.q.task_done()
-        except Empty:
-            if not self.latest_when_empty:
-                return []
-
-        return [self.latest]
+    def get_next(self, raise_empty=False, block_override=False):
+        raise NotImplementedError
 
     def empty_q(self):
 
@@ -130,17 +115,15 @@ class ThreadStream:
         records = []
 
         while not empty:
-
             try:
-                x = self.q.get(block=False)
+                x = self.get_next(raise_empty=True)
                 records.append(x)
-                self.q.task_done()
 
             except Empty:
                 if fresh:
-                    x = self.q.get(block=True)
+                    x = self.get_next(block_override=True)
                     records.append(x)
-                    self.q.task_done()
+
                 else:
                     empty = True
 
@@ -148,9 +131,74 @@ class ThreadStream:
 
         return records
 
-    def __exit__(self):
-        self.stop_event.set()
-        print("[ThreadStream] exit -- worker thread closed", flush=True)
+
+class ProcessStream(Stream):
+    # m: mp.Manager
+    q: mp.Queue
+    stop_event: mp.Event
+    workers: List[mp.Process] = []
+
+    def __init__(
+        self,
+        max_q_size: int = 100000,
+        debugging: bool = False,
+    ) -> None:
+
+        super().__init__(debugging)
+
+        # self.m = mp.Manager()
+        self.q = mp.Queue(maxsize=max_q_size)
+        self.stop_event = mp.Event()
+
+    def start_worker(self, worker, **kwargs):
+        proc = mp.Process(target=worker, kwargs=kwargs)
+        # proc.daemon = True
+        proc.start()
+        self.workers.append(proc)
+
+    def get_next(self, raise_empty=False, block_override=False):
+
+        try:
+            return self.q.get(block=block_override or self.block_until_next)
+
+        except Empty as e:
+
+            if raise_empty:
+                raise e
+
+            # Return none if Empty exception should not be raised
+            return None
+
+
+class ThreadStream(Stream):
+    q: Queue
+    stop_event: threading.Event = threading.Event()
+    workers: List[threading.Thread] = []
+
+    def __init__(self, max_q_size: int = 100000, debugging: bool = False) -> None:
+        super().__init__(debugging)
+        self.q = Queue(maxsize=max_q_size)
+
+    def start_worker(self, worker, **kwargs):
+        thr = threading.Thread(target=worker, kwargs=kwargs)
+        thr.daemon = True
+        thr.start()
+        self.workers.append(thr)
+
+    def get_next(self, raise_empty=False, block_override=False):
+
+        try:
+            item = self.q.get(block=block_override or self.block_until_next)
+            self.q.task_done()
+            return item
+
+        except Empty as e:
+
+            if raise_empty:
+                raise e
+
+            # Return None if Empty exception should not be raised
+            return None
 
 
 class MultiStream(ThreadStream):

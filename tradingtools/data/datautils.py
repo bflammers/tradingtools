@@ -8,6 +8,8 @@ from pathlib import Path
 from time import sleep, time
 from typing import Callable, Dict, List, Generator, Iterator
 
+from tradingtools.data.datahandling import ProcessStream
+
 try:
     from ..utils import warnings
     from ..utils import timestamp_to_string
@@ -128,13 +130,13 @@ def threadsafe_generator(f):
 
         def __init__(self, it):
             self.it = it
-            self.lock = threading.Lock()
+            self.thr_lock = threading.Lock()
 
         def __iter__(self):
             return self
 
         def __next__(self):
-            with self.lock:
+            with self.thr_lock:
                 return self.it.__next__()
 
     def g(*a, **kw):
@@ -144,7 +146,7 @@ def threadsafe_generator(f):
 
 class CSVWriter(ThreadStream):
     def __init__(self, path: Path, columns: list, nested: bool = False) -> None:
-        super().__init__(lifo=False)
+        super().__init__()
 
         self.path = path
         self.columns = columns
@@ -235,3 +237,5 @@ if __name__ == "__main__":
     for i in range(100):
         csv_writer.add_to_q({"a": i, "b": i + 1})
         print(csv_writer.read())
+
+    csv_writer.terminate()
