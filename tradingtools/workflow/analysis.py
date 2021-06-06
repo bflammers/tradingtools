@@ -7,7 +7,7 @@ from tqdm.notebook import tqdm_notebook as tqdm
 from .labelling import create_signals
 
 
-def plot_pairs(df, from_idx=0, to_idx=None):
+def plot_pairs(df, from_idx=0, to_idx=None, plot_standardized=True):
 
     # Determine starting and stopping date
     df_subset = (
@@ -27,52 +27,63 @@ def plot_pairs(df, from_idx=0, to_idx=None):
     df_plot = df[(df.index > dates["min_date"]) & (df.index < dates["max_date"])]
 
     # Plotting
-    n_plots = len(df["pair"].unique()) + 1
+    n_plots = len(df["pair"].unique()) + plot_standardized
     fig, axes = plt.subplots(nrows=n_plots, figsize=(10, 3 * n_plots))
 
     for i, (pair, df_pair) in enumerate(df_plot.groupby("pair")):
 
+        try:
+            ax = axes[i + plot_standardized]
+        except TypeError:
+            ax = axes
+        except Exception as e:
+            raise e
+            
+        print(ax)
+
         # All prices, standardized
-        if "standardized_price" in df_pair:
+        if plot_standardized and "standardized_price" in df_pair:
             df_pair["standardized_price"].plot(
                 ax=axes[0], title="All - standardized", label=pair
             )
 
         # Plot pair
-        df_pair["price"].plot(ax=axes[i + 1], title=pair)
+        df_pair["price"].plot(ax=ax, title=pair)
 
         # Plot signals
         if "signals" in df_pair:
-            
+
             # Sell
             df_sell = df_pair["price"][df_pair["signals"] == "sell"]
             if len(df_sell) > 0:
-                df_sell.plot(ax=axes[i + 1], marker="v", linestyle="None", color="red")
+                df_sell.plot(ax=ax, marker="v", linestyle="None", color="red")
 
             # Buy
             df_buy = df_pair["price"][df_pair["signals"] == "buy"]
             if len(df_buy):
-                df_buy.plot(ax=axes[i + 1], marker="^", linestyle="None", color="green")
+                df_buy.plot(ax=ax, marker="^", linestyle="None", color="green")
 
         # Plot markers for gaps
         if "upcoming_gap" in df_pair:
             df_gaps = df_pair["price"][df_pair["upcoming_gap"]]
             if len(df_gaps) > 0:
-                df_gaps.plot(ax=axes[i + 1], marker="X", linestyle="None", color="orange")
+                df_gaps.plot(ax=ax, marker="X", linestyle="None", color="orange")
 
         # Plot profit from backtest
         if "profit_percentage" in df_pair:
             line_color = "green" if df_pair["profit_percentage"][-1] > 0 else "red"
-            df_pair["profit_percentage"].plot(ax=axes[i + 1], color=line_color, secondary_y=True)
+            df_pair["profit_percentage"].plot(ax=ax, color=line_color, secondary_y=True)
 
         # Align x-axis
-        axes[i + 1].set_xlim(dates["min_date"], dates["max_date"])
+        ax.set_xlim(dates["min_date"], dates["max_date"])
 
     # Align x-axis for All - standardized plot
-    axes[0].set_xlim(dates["min_date"], dates["max_date"])
+    ax.set_xlim(dates["min_date"], dates["max_date"])
 
-    axes[0].legend(loc="lower right")
+    ax.legend(loc="lower right")
     fig.tight_layout()
+
+    return fig
 
 
 def objective(params, df, history, ahead, cost_factor=0.002):
@@ -181,9 +192,7 @@ def backtest_pair(
             portfolio.update(tick.price, "sell", 0)
 
         else:
-            portfolio.update(
-                tick.price, tick.signals, tick.target_fraction
-            )
+            portfolio.update(tick.price, tick.signals, tick.target_fraction)
 
         if track_metrics:
             ticks_backtest.append(
