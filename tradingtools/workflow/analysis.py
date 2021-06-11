@@ -39,8 +39,6 @@ def plot_pairs(df, from_idx=0, to_idx=None, plot_standardized=True):
         except Exception as e:
             raise e
             
-        print(ax)
-
         # All prices, standardized
         if plot_standardized and "standardized_price" in df_pair:
             df_pair["standardized_price"].plot(

@@ -10,29 +10,31 @@ logger = logging.getLogger(__name__)
 
 #### Helpers
 
-def drop_na(X: pd.DataFrame, y: pd.Series):
+def drop_na(X: pd.DataFrame, *args):
     
     na_rows = X.isna().any(axis=1)
-    logger.info(f"Dropping {sum(na_rows)} because of na's in rows X")
+    logger.info(f"Dropping {sum(na_rows)} rows because of na's in X")
 
     # Drop
-    X = X.loc[~na_rows.values]
-    y = y.loc[~na_rows.values]
+    result = (X.loc[~na_rows.values], )
+    for arg in args:
+        result += (arg.loc[~na_rows.values], )
     
-    return X, y
+    return result
 
 
-def drop_after_timegap(X: pd.DataFrame, y: pd.DataFrame, gaps: pd.Series, n: int):
+def drop_after_timegap(gaps: pd.Series, n: int, *args):
     
     # Determine indices (timestamps) that need to be dropped
-    drop_idx = gaps.index[gaps.rolling(n).sum().shift() >= 1]
-    logger.info(f"Dropping {len(drop_idx)} because of timegaps ({n} rows after each gap is dropped)")
+    drop_mask = gaps.rolling(n).sum().shift() >= 1
+    logger.info(f"Dropping {sum(drop_mask)} rows because of timegaps ({n} rows following gap dropped)")
     
     # Drop
-    X = X.drop(index=drop_idx)
-    y = y.drop(index=drop_idx)
+    result = tuple()
+    for arg in args:
+        result += (arg.loc[~drop_mask], )
     
-    return X, y
+    return result
 
 
 #### Pre processing
@@ -48,8 +50,8 @@ def rolling_ohlc(x: pd.Series, window: int = 60):
 
 def rolling_standardize(x: pd.Series, window: int = 100):
 
-    if window <= 3:
-        logger.warning("rolling standardize with window <= 3, returning unscaled")
+    if window < 4:
+        logger.warning("rolling standardize with window < 4, returning unscaled")
         return x, pd.Series(0, index=x.index), pd.Series(1, index=x.index)
 
     # Rolling window, calc mean and std dev
@@ -67,8 +69,8 @@ def rolling_standardize(x: pd.Series, window: int = 100):
 
 def rolling_minmax_standardize(x: pd.Series, window: int = 100):
 
-    if window <= 3:
-        logger.warning("rolling standardize with window <= 3, returning unscaled")
+    if window < 4:
+        logger.warning("rolling standardize with window < 4, returning unscaled")
         return x, pd.Series(0, index=x.index), pd.Series(1, index=x.index)
 
     # Rolling window, calc mean and std dev
