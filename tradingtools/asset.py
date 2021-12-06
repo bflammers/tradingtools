@@ -3,11 +3,13 @@ from uuid import uuid4
 from decimal import Decimal
 from typing import List
 
+from .broker import AbstractBroker
 
-class Asset:
+class AbstractAsset:
 
     _name: str = None
     _quantity: Decimal = None
+    _broker: AbstractBroker = None
 
     def __init__(self, name, broker) -> None:
         self._id = uuid4.hex()
@@ -33,9 +35,9 @@ class Asset:
         raise NotImplementedError
 
 
-class CompositeAsset(Asset):
+class CompositeAsset(AbstractAsset):
 
-    _children: List[Asset] = []
+    _children: List[AbstractAsset] = []
 
     def __init__(self, name, broker) -> None:
         super().__init__(name, broker)
@@ -66,7 +68,8 @@ class CompositeAsset(Asset):
     def get_price(self) -> Decimal:
         return self.get_value()
 
-class SymbolAsset(Asset):
+
+class SymbolAsset(AbstractAsset):
 
     _price : Decimal
     _quantity_lock: bool = False
@@ -83,7 +86,7 @@ class SymbolAsset(Asset):
         if self._quantity != new_quantity:
             if not self._quantity_locked():
                 difference = new_quantity - self._quantity
-                self._broker.order(difference, self._update_quantity_callback)
+                self._broker.order(difference, self)
 
     def accept(self, visitor) -> None:
         visitor.visit_symbol(self)

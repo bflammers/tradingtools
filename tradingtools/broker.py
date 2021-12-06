@@ -1,33 +1,19 @@
+from logging import getLogger
 from uuid import uuid4
-import pandas as pd
-import ccxt
 from decimal import Decimal
 from dataclasses import dataclass
+from datetime import datetime
 
-try:
-    from .utils import extract_prices, timestamp_to_string, warnings
-except:
-    from utils import extract_prices, timestamp_to_string, warnings
+import ccxt
+
+from .asset import AbstractAsset
 
 
-@dataclass
-class Settlement:
-    order_id: str
-    status: str
-    trading_pair: str
-    exchange_order_id: str = None
-    timestamp: str = None
-    value: Decimal = None
-    price: Decimal = None
-    amount: Decimal = None
-    cost: Decimal = None
-    average_cost: Decimal = None
-    fee: Decimal = None
-    fee_currency: str = None
+logger = getLogger(__name__)
 
 
 @dataclass
-class Order:
+class ExchangeOrder:
     order_id: str
     trading_pair: str
     status: str
@@ -36,59 +22,120 @@ class Order:
     timestamp_tick: str
     price_execution: Decimal
     cost_execution: Decimal
-    timestamp_execution: Decimal
+    timestamp_execution: datetime
     settled: bool = False
     value_settlement: Decimal = None
     price_settlement: Decimal = None
-    timestamp_settlement: Decimal = None
+    timestamp_settlement: datetime = None
     cost_settlement: Decimal = None
     average_cost_settlement: Decimal = None
     exchange_order_id: str = None
     fee: Decimal = None
     fee_currency: str = None
 
-    def settle(self, settlement: Settlement) -> None:
+    def settle(
+        self,
+        status: str,
+        value: Decimal = None,
+        price: Decimal = None,
+        timestamp: datetime = None,
+        cost: Decimal = None,
+        average_cost: Decimal = None,
+        exchange_order_id: str = None,
+        fee: Decimal = None, 
+        fee_currency: str = None
+    ) -> None:
 
-        self.value_settlement = settlement.value
-        self.price_settlement = settlement.price
-        self.timestamp_settlement = settlement.timestamp
-        self.cost_settlement = settlement.cost
-        self.average_cost_settlement = settlement.average_cost
-        self.exchange_order_id = settlement.exchange_order_id
-        self.fee = settlement.fee
-        self.fee_currency = settlement.fee_currency
+        self.status = status
+        self.value_settlement = value
+        self.price_settlement = price
+        self.timestamp_settlement = timestamp
+        self.cost_settlement = cost
+        self.average_cost_settlement = average_cost
+        self.exchange_order_id = exchange_order_id
+        self.fee = fee
+        self.fee_currency = fee_currency
         self.settled = True
 
 
-class Broker:
-    def __init__(
-        self,
-        backtest: bool = True,
-        exchange_name: str = "binance",
-        api_key: str = None,
-        secret_key: str = None,
-        verbose: bool = True,
-    ) -> None:
-        super().__init__()
-        self.exchange = None
-        self.backtest = backtest
-        self.exchange_name = exchange_name
-        self._verbose = verbose
-        self._min_order_amount = Decimal(0.001)
+class AbstractBroker:
 
-        if not self.backtest:
+    _exchange: ccxt.binance
+    _exchange_name: str = None
 
+    def __init__(self, credentials, backtest=True) -> None:
+        self._credentials = credentials
+        self._backtest = backtest
+
+        self._exchange = self._exchange_factory()
+        self._live_trading_confirmation()
+
+    def _live_trading_confirmation(self):
+
+        if not self._backtest:
             confirmation = input(
-                "[Broker] backtest = False, are you sure you want to perform actual trades? (type y to continue)"
+                "[Broker] backtest = False, are you sure you want to perform actual trades? (y)"
             )
 
             if confirmation != "y":
-                raise Exception("Please re-run broker init with backtest=False")
+                raise Exception("Live trading aborted")
 
-        self.exchange = ccxt.binance(
+    @staticmethod
+    def _exchange_factory(credentials: dict):
+        raise NotImplementedError
+
+    def order(self, symbol: str, side: str, amount: Decimal, order_type: str, price: Decimal = None) -> dict:
+
+        if order_type == "market" and price is not None:
+            logger.warning("[Broker] order_type = market and price is not None")
+
+        params = {
+            "test": self._backtest,  # test if it's valid, but don't actually place it
+        }
+
+        # Create market order through ccxt with specified exchange
+        order_response = self._exchange.create_order(
+            symbol=symbol,
+            type=order_type,
+            side=side,
+            amount=amount,
+            price=price,
+            params=params,
+        ) 
+
+        logger.info(f"[Broker] order response: {order_response}") 
+
+        return order_response
+
+    @staticmethod
+    def _settle_order(order: ExchangeOrder, order_response: dict):
+
+        order.settle(
+            order_id=order.order_id,
+            status="pending",
+            trading_pair=order.trading_pair,
+            exchange_order_id=order_response["id"],
+            timestamp=order_response["datetime"],
+            price=Decimal(order_response["price"]),
+            value=Decimal(order_response["price"]) * Decimal(order_response["amount"]),
+            amount=Decimal(order_response["amount"]),
+            cost=Decimal(order_response["cost"]),
+            average_cost=Decimal(order_response["average"]),
+            fee=Decimal(order_response["fee"]["cost"]),
+            fee_currency=order_response["fee"]["currency"],
+        )
+
+
+class BinanceBroker(AbstractBroker):
+
+    _exchange_name: str = "binance"
+
+    @staticmethod
+    def _exchange_factory(credentials):
+        exchange = ccxt.binance(
             {
-                "apiKey": api_key,
-                "secret": secret_key,
+                "apiKey": credentials["api_key"],
+                "secret": credentials["secret_key"],
                 "timeout": 30000,
                 "enableRateLimit": True,
                 "options": {
@@ -98,10 +145,10 @@ class Broker:
             }
         )
 
-        if self._verbose:
-            print(
-                f"[Broker] logged into Binance -- Status: {self.exchange.fetch_status()['status']}"
-            )
+        exchange_status = exchange.fetch_status()["status"]
+        logger.info(f"[BinanceBroker] logged into Binance -- Status: {exchange_status}")
+
+        return exchange
 
     def place_order(self, order: Order, tick: list = []) -> Settlement:
 
@@ -120,7 +167,9 @@ class Broker:
                     amount=order.amount,
                 )
             except Exception as e:
-                warnings.warn(f'[Broker.place_order] failed with order: \n\t{order} and messsage: \n\t{e}')
+                warnings.warn(
+                    f"[Broker.place_order] failed with order: \n\t{order} and messsage: \n\t{e}"
+                )
                 settlement = Settlement(
                     order_id=order.order_id,
                     status="failed",
@@ -128,94 +177,10 @@ class Broker:
                 )
                 return settlement
 
-        settlement = Settlement(
-            order_id=order.order_id,
-            status="pending",
-            trading_pair=order.trading_pair,
-            exchange_order_id=order_response["id"],
-            timestamp=order_response["datetime"],
-            price=Decimal(order_response["price"]),
-            value = Decimal(order_response["price"]) * Decimal(order_response["amount"]),
-            amount=Decimal(order_response["amount"]),
-            cost=Decimal(order_response["cost"]),
-            average_cost=Decimal(order_response["average"]),
-            fee=Decimal(order_response["fee"]["cost"]),
-            fee_currency=order_response["fee"]["currency"],
-        )
-
-        return settlement
-
     def get_symbol_amounts(self):
         balance = self.exchange.fetch_balance()
         symbol_amounts = {k: Decimal(v) for k, v in balance["free"].items() if v > 0}
         return symbol_amounts
-
-    # def _prep_order_for_exchange(self, order: Order) -> dict:
-
-    #     adjusted_order = order.copy()
-
-    #     if self.exchange_name == "binance":
-
-    #         if order["amount"] < (self._min_order_amount - Decimal(0.00001)):
-    #             warnings.warn(
-    #                 f"[Broker._prep_order_for_exchange] order {order['order_id']} amount smaller than exchange smallest order amount"
-    #             )
-
-    #         trading_pair_mapping = {"BTCEUR": "BTC/EUR", "BTCUSD": "BTC/USDT"}
-
-    #         if order["trading_pair"] in trading_pair_mapping:
-    #             adjusted_order["trading_pair"] = trading_pair_mapping[
-    #                 order["trading_pair"]
-    #             ]
-
-    #     return adjusted_order
-
-    def _place_market_order(
-        self, trading_pair: str, side: str, amount: Decimal
-    ) -> dict:
-
-        # extra params and overrides if needed
-        params = {
-            "test": self.backtest,  # test if it's valid, but don't actually place it
-        }
-
-        # Create market order through ccxt with specified exchange
-        order_response = self.exchange.create_order(
-            symbol=trading_pair,
-            type="market",
-            side=side,
-            amount=amount,
-            price=None,
-            params=params,
-        )
-
-        if self._verbose:
-            print(f"[Broker] order response: {order_response}")
-
-        return order_response
-
-    def _simulate_order_response(self, order: Order, tick: list = []) -> dict:
-
-        prices_high = extract_prices(tick, "high")
-
-        if self.exchange_name == "binance":
-            fee = order.cost_execution / 1000
-        else:
-            fee = order.cost_execution / 100
-
-        price = prices_high[order.trading_pair]
-
-        order_response = {
-            "id": uuid4().hex,
-            "datetime": timestamp_to_string(pd.Timestamp.now()),
-            "price": price,
-            "amount": order.amount,
-            "cost": price * order.amount + fee,
-            "average": price * order.amount,
-            "fee": {"cost": fee, "currency": "EUR"},
-        }
-
-        return order_response
 
 
 if __name__ == "__main__":
