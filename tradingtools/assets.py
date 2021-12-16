@@ -1,28 +1,38 @@
+import asyncio
 
 from uuid import uuid4
 from decimal import Decimal
 from typing import List
+from dataclasses import dataclass
 
 from .broker import AbstractBroker
+from .visitors import AbstractAssetVisitor
+
+
+@dataclass
+class AssetConfig:
+    name: str
+    tolerance_EUR: Decimal = Decimal(0.01)
+
 
 class AbstractAsset:
 
-    _name: str = None
+    _config: AssetConfig = None
     _quantity: Decimal = None
     _broker: AbstractBroker = None
 
-    def __init__(self, name, broker) -> None:
+    def __init__(self, config: AssetConfig, broker: AbstractBroker = None) -> None:
         self._id = uuid4.hex()
-        self._name = name
+        self._config = config
         self._broker = broker
 
     def update_price(self, prices) -> None:
         raise NotImplementedError
 
-    def update_quantity(self, quantities) -> None:
+    async def update_quantity(self, quantities) -> None:
         raise NotImplementedError
 
-    def accept(self, visitor) -> None:
+    def accept(self, visitor: AbstractAssetVisitor) -> None:
         raise NotImplementedError
 
     def get_value(self) -> Decimal:
@@ -39,19 +49,20 @@ class CompositeAsset(AbstractAsset):
 
     _children: List[AbstractAsset] = []
 
-    def __init__(self, name, broker) -> None:
-        super().__init__(name, broker)
+    def __init__(self, config: AssetConfig, broker: AbstractBroker = None) -> None:
+        super().__init__(config, broker)
         self._quantity = Decimal(1)
 
     def update_price(self, prices) -> None:
         for child in self._children:
             child.update_price(prices)
 
-    def update_quantity(self, quantities) -> None:
+    async def update_quantity(self, quantities) -> None:
         for child in self._children:
-            child.update_quantity(quantities)
+            await child.update_quantity(quantities)
 
-    def accept(self, visitor) -> None:
+    def accept(self, visitor: AbstractAssetVisitor) -> None:
+        visitor.visit_composite_asset(self)
         for child in self._children:
             child.accept(visitor)
 
@@ -71,25 +82,26 @@ class CompositeAsset(AbstractAsset):
 
 class SymbolAsset(AbstractAsset):
 
-    _price : Decimal
-    _quantity_lock: bool = False
+    _price: Decimal
+    _quantity_update_lock: asyncio.Lock = asyncio.Lock()
 
-    def __init__(self, name, broker) -> None:
-        super().__init__(name, broker)
+    def __init__(self, config: AssetConfig, broker: AbstractBroker = None) -> None:
+        super().__init__(config, broker)
         self._quantity = Decimal(0)
 
     def update_price(self, prices) -> None:
         self._price = prices[self._name]
 
-    def update_quantity(self, quantities) -> None:
+    async def update_quantity(self, quantities) -> None:
         new_quantity = quantities[self._name]
-        if self._quantity != new_quantity:
-            if not self._quantity_locked():
-                difference = new_quantity - self._quantity
-                self._broker.order(difference, self)
 
-    def accept(self, visitor) -> None:
-        visitor.visit_symbol(self)
+        async with self._quantity_update_lock:
+            difference = new_quantity - self._quantity
+            if difference > self._config.tolerance_EUR:
+                await self._broker.order(difference, self)
+
+    def accept(self, visitor: AbstractAssetVisitor) -> None:
+        visitor.visit_symbol_asset(self)
 
     def get_value(self) -> Decimal:
         return self._quantity * self._price
@@ -99,14 +111,3 @@ class SymbolAsset(AbstractAsset):
 
     def get_price(self) -> Decimal:
         return self._price
-
-    def _update_quantity_callback(self, quantity) -> None:
-        self._quantity = quantity
-        self._quantity_lock = False
-
-    def _quantity_locked(self) -> bool:
-        if self._quantity_lock:
-            return True
-        
-        self._quantity_lock = True
-        return False

@@ -1,73 +1,101 @@
 from decimal import Decimal
-import pandas as pd
-import warnings
+from time import time
+from logging import getLogger
+from typing import Dict, Tuple
+
+logger = getLogger(__name__)
 
 
-def _warning_on_one_line(message, category, filename, lineno, file=None, line=None):
-    return "%s:%s: %s: %s\n" % (filename, lineno, category.__name__, message)
+def split_pair(pair: str) -> Tuple:
+
+    seperators = ["-", "/"]
+    for sep in seperators:
+
+        try:
+            splitted = pair.split(sep)
+            base, quote = splitted[0], splitted[1]
+        except IndexError:
+            pass
+
+        if len(splitted) == 2:
+            return base, quote
+
+    logger.error(f"[split_pair] Not able to split {pair} on {seperators}")
 
 
-warnings.formatwarning = _warning_on_one_line
+class Prices:
+
+    time_tol_sec: float
+    data: Dict[str, Dict[str, dict]] = {}
+
+    def __init__(self, time_tol_sec: float = 120.0) -> None:
+        self.time_tol_sec = time_tol_sec
+
+    def clear(self) -> None:
+        self.data = {}
+
+    def _safe_get(self, base: str, quote: str) -> dict:
+
+        try:
+            base_dict = self.data[base]
+        except KeyError:
+            self.data[base] = {}
+            base_dict = self.data[base]
+
+        try:
+            quote_dict = base_dict[quote]
+        except KeyError:
+            self.data[base][quote] = {}
+            quote_dict = self.data[base][quote]
+
+        return quote_dict
+
+    def _safe_set(self, base: str, quote: str, price: Decimal) -> dict:
+
+        _ = self._safe_get(base, quote)
+        self.data[base][quote] = {
+            "price": Decimal(price),
+            "update_time": time(),
+            "pair": f"{base}/{quote}",
+        }
+
+    def update(self, pair, price):
+        base, quote = split_pair(pair)
+        self._safe_set(base, quote, price)
+
+    def get(self, pair):
+        base, quote = split_pair(pair)
+        price = self._safe_get(base, quote)
+
+        if price:
+            time_diff = time() - price["update_time"]
+            if time_diff > self.time_tol_sec:
+                logger.warning(
+                    f"[Prices] asset_name {pair} not updated for {time_diff} seconds"
+                )
+        else:
+            logger.warning(f"[Prices] asset_name {pair} not yet updated")
+            return None
+
+        return price["price"]
 
 
-class colors:
-    HEADER = "\033[95m"
-    OKBLUE = "\033[94m"
-    OKCYAN = "\033[96m"
-    OKGREEN = "\033[92m"
-    WARNING = "\033[93m"
-    FAIL = "\033[91m"
-    ENDC = "\033[0m"
-    BOLD = "\033[1m"
-    UNDERLINE = "\033[4m"
+if __name__ == "__main__":
 
+    print(split_pair("BTC-EUR"))
+    print(split_pair("BTC/EUR"))
 
-def color_number_sign(x: Decimal, decimals: int = 3, offset: float = 0) -> str:
-    if (x - offset) > 0:
-        return f"{colors.OKGREEN}+{x:.{decimals}f}{colors.ENDC}"
-    else:
-        return f"{colors.FAIL}{x:.{decimals}f}{colors.ENDC}"
+    p = Prices(time_tol_sec=0)
+    p.update("BTC/EUR", 10)
+    print(p.data)
+    print(p.get("BTC-EUR"))
+    p.update("BTC-EUR", 12)
+    print(p.get("BTC/EUR"))
 
+    p.update("BTC/USD", 5)
+    p.update("ETH/EUR", 6)
 
-def print_item(
-    currency: str,
-    value: Decimal,
-    profit: Decimal = None,
-    profit_percentage: Decimal = None,
-    n_orders: int = None,
-    n_open_orders: int = None,
-) -> str:
+    data = p.data
+    print(data)
 
-    # value_colored = color_number_sign(value, decimals=2)
-    out = f"{currency} {value:.3f}"
-
-    if profit is not None:
-        profit_colored = color_number_sign(profit)
-        out += f" / {profit_colored} profit"
-
-    if profit_percentage is not None:
-        profit_percentage_colored = color_number_sign(profit_percentage)
-        out += f" / {profit_percentage_colored} %"
-
-    if n_orders is not None:
-        out += f" / {n_orders} orders"
-
-    if n_open_orders is not None:
-        out += f" / {n_open_orders} open orders"
-
-    return out
-
-
-_strftime_format = "%Y-%m-%d %H:%M:%S.%f"
-
-
-def timestamp_to_string(ts: pd.Timestamp) -> str:
-    return ts.strftime(_strftime_format)
-
-
-def string_to_timestamp(ts_string: str) -> pd.Timestamp:
-    return pd.Timestamp(ts_string)
-
-
-def extract_prices(tick: list, price_type: str = "close") -> dict:
-    return {t["trading_pair"]: Decimal(t[price_type]) for t in tick if price_type in t}
+    p.get("BTC-AAA")

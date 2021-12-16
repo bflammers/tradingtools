@@ -1,19 +1,20 @@
+import asyncio
+
 from logging import getLogger
 from uuid import uuid4
 from decimal import Decimal
 from dataclasses import dataclass
 from datetime import datetime
+from random import randint
 
-import ccxt
-
-from .asset import AbstractAsset
+import ccxt.async_support as ccxt
 
 
 logger = getLogger(__name__)
 
 
 @dataclass
-class ExchangeOrder:
+class Order:
     order_id: str
     trading_pair: str
     status: str
@@ -42,8 +43,8 @@ class ExchangeOrder:
         cost: Decimal = None,
         average_cost: Decimal = None,
         exchange_order_id: str = None,
-        fee: Decimal = None, 
-        fee_currency: str = None
+        fee: Decimal = None,
+        fee_currency: str = None,
     ) -> None:
 
         self.status = status
@@ -84,7 +85,14 @@ class AbstractBroker:
     def _exchange_factory(credentials: dict):
         raise NotImplementedError
 
-    def order(self, symbol: str, side: str, amount: Decimal, order_type: str, price: Decimal = None) -> dict:
+    async def order(
+        self,
+        symbol: str,
+        side: str,
+        amount: Decimal,
+        order_type: str,
+        price: Decimal = None,
+    ) -> dict:
 
         if order_type == "market" and price is not None:
             logger.warning("[Broker] order_type = market and price is not None")
@@ -94,21 +102,21 @@ class AbstractBroker:
         }
 
         # Create market order through ccxt with specified exchange
-        order_response = self._exchange.create_order(
+        order_response = await self._exchange.create_order(
             symbol=symbol,
             type=order_type,
             side=side,
             amount=amount,
             price=price,
             params=params,
-        ) 
+        )
 
-        logger.info(f"[Broker] order response: {order_response}") 
+        logger.info(f"[Broker] order response: {order_response}")
 
         return order_response
 
     @staticmethod
-    def _settle_order(order: ExchangeOrder, order_response: dict):
+    def _settle_order(order: Order, order_response: dict):
 
         order.settle(
             order_id=order.order_id,
@@ -150,89 +158,17 @@ class BinanceBroker(AbstractBroker):
 
         return exchange
 
-    def place_order(self, order: Order, tick: list = []) -> Settlement:
 
-        # orders = {"trading_pair": "BTCUSD", "side": "buy", "amount": 10}
+class DummyBroker(AbstractBroker):
+    def __init__(self, credentials=None, backtest=True) -> None:
+        pass
 
-        # adjusted_order = self._prep_order_for_exchange(order)
-
-        if self.backtest:
-            order_response = self._simulate_order_response(order, tick)
-        else:
-
-            try:
-                order_response = self._place_market_order(
-                    trading_pair=order.trading_pair,
-                    side=order.side,
-                    amount=order.amount,
-                )
-            except Exception as e:
-                warnings.warn(
-                    f"[Broker.place_order] failed with order: \n\t{order} and messsage: \n\t{e}"
-                )
-                settlement = Settlement(
-                    order_id=order.order_id,
-                    status="failed",
-                    trading_pair=order.trading_pair,
-                )
-                return settlement
-
-    def get_symbol_amounts(self):
-        balance = self.exchange.fetch_balance()
-        symbol_amounts = {k: Decimal(v) for k, v in balance["free"].items() if v > 0}
-        return symbol_amounts
-
-
-if __name__ == "__main__":
-
-    order = Order(
-        order_id=uuid4().hex,
-        trading_pair="BTC/EUR",
-        status="pending",
-        side="buy",
-        amount=Decimal("0.1"),
-        timestamp_tick=timestamp_to_string(pd.Timestamp.now()),
-        price_execution=Decimal("32009"),
-        cost_execution=Decimal("0.01") * Decimal("32009"),
-        timestamp_execution=timestamp_to_string(pd.Timestamp.now()),
-    )
-
-    tick = [
-        {
-            "trading_pair": "BTC/EUR",
-            "open": Decimal(3902.52),
-            "high": Decimal(3908.0),
-            "low": Decimal(3902.25),
-            "close": Decimal(3902.25),
-            "volume": Decimal(0.25119066),
-            "timestamp": timestamp_to_string(pd.Timestamp.now()),
-        },
-        {
-            "trading_pair": "ETH/USD",
-            "open": Decimal(3902.52),
-            "high": Decimal(3908.0),
-            "low": Decimal(3902.25),
-            "close": Decimal(3902.25),
-            "volume": Decimal(0.25119066),
-            "timestamp": timestamp_to_string(pd.Timestamp.now()),
-        },
-    ]
-
-    import json
-
-    with open("./secrets.json", "r") as in_file:
-        secrets = json.load(in_file)["binance"]
-
-    brkr = Broker(
-        backtest=False,
-        exchange_name="binance",
-        api_key=secrets["api_key"],
-        secret_key=secrets["secret_key"],
-    )
-    settlement = brkr.place_order(order, tick)
-    print(settlement)
-
-    # print("\n\n----")
-    # orders = brkr.exchange.fetch_orders("BTC/EUR")
-    # print(orders)
-    # print(len(orders))
+    async def order(
+        self,
+        symbol: str,
+        side: str,
+        amount: Decimal,
+        order_type: str,
+        price: Decimal = None,
+    ) -> dict:
+        await asyncio.sleep(randint(1, 3))
