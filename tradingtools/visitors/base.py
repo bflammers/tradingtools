@@ -11,3 +11,6 @@ class AbstractAssetVisitor:
     def visit_symbol_asset(self, asset) -> None:
         raise NotImplementedError
 
+    def leave(self) -> None:
+        raise NotImplementedError
+

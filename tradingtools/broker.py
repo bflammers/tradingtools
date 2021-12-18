@@ -1,6 +1,7 @@
 import asyncio
 
 from logging import getLogger
+from typing import Dict, List
 from uuid import uuid4
 from decimal import Decimal
 from dataclasses import dataclass
@@ -9,60 +10,59 @@ from random import randint
 
 import ccxt.async_support as ccxt
 
+from .assets import AbstractAsset
+
 
 logger = getLogger(__name__)
 
 
 @dataclass
 class Order:
-    order_id: str
-    trading_pair: str
-    status: str
+
+    # Execution
+    symbol: str
     side: str
     amount: Decimal
-    timestamp_tick: str
-    price_execution: Decimal
-    cost_execution: Decimal
-    timestamp_execution: datetime
-    settled: bool = False
-    value_settlement: Decimal = None
+    type: str
+    status: str = "open"
+    price: Decimal = None
+    timestamp_created: datetime = datetime.now()
+    order_id: str = uuid4().hex
+    # Settlement
     price_settlement: Decimal = None
     timestamp_settlement: datetime = None
-    cost_settlement: Decimal = None
-    average_cost_settlement: Decimal = None
     exchange_order_id: str = None
     fee: Decimal = None
     fee_currency: str = None
 
+    def __post_init__(self):
+
+        if type == "market" and self.price is not None:
+            logger.warning("[Broker] order type is market and price is not None")
+
     def settle(
         self,
-        status: str,
-        value: Decimal = None,
         price: Decimal = None,
         timestamp: datetime = None,
-        cost: Decimal = None,
-        average_cost: Decimal = None,
         exchange_order_id: str = None,
         fee: Decimal = None,
         fee_currency: str = None,
     ) -> None:
 
-        self.status = status
-        self.value_settlement = value
         self.price_settlement = price
         self.timestamp_settlement = timestamp
-        self.cost_settlement = cost
-        self.average_cost_settlement = average_cost
         self.exchange_order_id = exchange_order_id
         self.fee = fee
         self.fee_currency = fee_currency
-        self.settled = True
+        self.status = "settled"
 
 
 class AbstractBroker:
 
-    _exchange: ccxt.binance
+    _exchange: ccxt.Exchange 
     _exchange_name: str = None
+    _assets: Dict[str: AbstractAsset]
+    _orders: Dict[str: List[Order]]
 
     def __init__(self, credentials, backtest=True) -> None:
         self._credentials = credentials
@@ -85,17 +85,18 @@ class AbstractBroker:
     def _exchange_factory(credentials: dict):
         raise NotImplementedError
 
-    async def order(
-        self,
-        symbol: str,
-        side: str,
-        amount: Decimal,
-        order_type: str,
-        price: Decimal = None,
-    ) -> dict:
+    # def update_quantity(self, quantities) -> None:
+    #     new_quantity = quantities[self._name]
 
-        if order_type == "market" and price is not None:
-            logger.warning("[Broker] order_type = market and price is not None")
+    #     async with self._quantity_update_lock:
+    #         difference = new_quantity - self._quantity
+    #         if difference > self._config.tolerance_EUR:
+    #             await self._broker.fill_position(difference, self)
+
+    async def place_order(
+        self, 
+        order: Order
+    ) -> dict:
 
         params = {
             "test": self._backtest,  # test if it's valid, but don't actually place it
@@ -103,11 +104,11 @@ class AbstractBroker:
 
         # Create market order through ccxt with specified exchange
         order_response = await self._exchange.create_order(
-            symbol=symbol,
-            type=order_type,
-            side=side,
-            amount=amount,
-            price=price,
+            symbol=order.symbol,
+            type=order.type,
+            side=order.side,
+            amount=order.amount,
+            price=order.price,
             params=params,
         )
 
