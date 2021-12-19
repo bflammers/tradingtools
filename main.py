@@ -13,6 +13,3 @@ from tradingtools import visitors
 #     price_execution=Decimal('12.90')
 # )
 
-# print(order)
-
-Decimal('1') * None

@@ -1,8 +1,7 @@
-
 from logging import getLogger
 from uuid import uuid4
 from decimal import Decimal
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from time import time
 
 from .visitors import AbstractAssetVisitor
@@ -79,6 +78,9 @@ class AbstractAsset:
         self._name = name
         self._prices = prices
 
+    def get_name(self) -> str:
+        return self._name
+
     def accept(self, visitor: AbstractAssetVisitor) -> None:
         raise NotImplementedError
 
@@ -94,11 +96,16 @@ class AbstractAsset:
     def get_price(self) -> Decimal:
         raise NotImplementedError
 
+    def get_difference(self, quantity: Decimal) -> Tuple[Decimal]:
+        quantity_diff = quantity - self.get_quantity()
+        price_diff = quantity_diff * self.get_price()
+        return quantity_diff, price_diff
+
 
 class CompositeAsset(AbstractAsset):
 
     _children: List[AbstractAsset] = []
-    _quantity: Decimal = Decimal('1')
+    _quantity: Decimal = Decimal("1")
 
     def accept(self, visitor: AbstractAssetVisitor) -> None:
         visitor.visit_composite_asset(self)
@@ -106,14 +113,16 @@ class CompositeAsset(AbstractAsset):
             child.accept(visitor)
 
     def get_value(self) -> Decimal:
-        value = Decimal('0')
+        value = Decimal("0")
         for child in self._children:
             value += child.get_value()
 
         return value
 
     def set_quantity(self, quantity: Decimal) -> None:
-        logger.warning("[CompositeAsset] set_quantity() called on object of class CompositeAsset")
+        logger.warning(
+            "[CompositeAsset] set_quantity() called on object of class CompositeAsset"
+        )
 
     def get_quantity(self) -> Decimal:
         return self._quantity
@@ -124,11 +133,30 @@ class CompositeAsset(AbstractAsset):
     def add_asset(self, asset: AbstractAsset) -> None:
         self._children.append(asset)
 
+    def get_asset(self, name: str) -> AbstractAsset:
+
+        for child in self._children:
+            if child.get_name() == name:
+                return child
+
+        logger.info(f"[CompositeAsset.get_asset] no child with name {name}")
+        return None
+
+    def get_or_create_symbol_asset(self, name: str) -> AbstractAsset:
+
+        asset = self.get_asset(name)
+
+        if not asset:
+            asset = SymbolAsset(name, self._prices)
+            self.add_asset(asset)
+
+        return asset
+
 
 class SymbolAsset(AbstractAsset):
 
     _price: Decimal
-    _quantity: Decimal = Decimal('0')
+    _quantity: Decimal = Decimal("0")
 
     def accept(self, visitor: AbstractAssetVisitor) -> None:
         visitor.visit_symbol_asset(self)
