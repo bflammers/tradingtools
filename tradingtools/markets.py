@@ -4,27 +4,25 @@ from decimal import Decimal
 from typing import List, Dict, Tuple
 from time import time
 
-from .visitors import AbstractAssetVisitor
 from .utils import split_pair
 
 logger = getLogger(__name__)
 
 
-class AbstractAsset:
+class AbstractMarket:
 
-    _name: str
+    _pair: str
     _price_update_time: time
     _time_diff_tol_sec: float
     _price: Decimal = None
-    _quantity: Decimal = None
 
-    def __init__(self, name: str, time_diff_tol_sec: float = 120.0) -> None:
+    def __init__(self, pair: str, time_diff_tol_sec: float = 120.0) -> None:
         self._id = uuid4().hex
-        self._name = name
+        self._pair = pair
         self._time_diff_tol_sec = time_diff_tol_sec
 
     def get_name(self) -> str:
-        return self._name
+        return self._pair
 
     def set_quantity(self, quantity: Decimal) -> None:
         raise NotImplementedError
@@ -33,7 +31,6 @@ class AbstractAsset:
         return self._quantity
 
     def set_price(self, price: Decimal) -> None:
-        # TODO: adjust this to work with a variable quote asset
         raise NotImplementedError
 
     def update_prices(self, prices: Dict[str, Decimal]) -> None:

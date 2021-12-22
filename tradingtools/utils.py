@@ -1,3 +1,5 @@
+import sys
+import signal
 
 from logging import getLogger
 from typing import Tuple
@@ -6,7 +8,33 @@ from decimal import Decimal
 from datetime import datetime
 from uuid import uuid4
 
+
+try:
+    # unix / macos only
+    from signal import SIGHUP
+
+    SIGNALS = (signal.SIGABRT, signal.SIGINT, signal.SIGTERM, SIGHUP)
+except ImportError:
+    SIGNALS = (signal.SIGABRT, signal.SIGINT, signal.SIGTERM)
+
 logger = getLogger(__name__)
+
+
+def setup_signal_handlers(loop):
+    """
+    This must be run from the loop in the main thread
+    """
+
+    def handle_stop_signals(*args):
+        raise SystemExit
+
+    if sys.platform.startswith("win"):
+        # NOTE: asyncio loop.add_signal_handler() not supported on windows
+        for sig in SIGNALS:
+            signal.signal(sig, handle_stop_signals)
+    else:
+        for sig in SIGNALS:
+            loop.add_signal_handler(sig, handle_stop_signals)
 
 
 def split_pair(pair: str) -> Tuple:
@@ -24,6 +52,23 @@ def split_pair(pair: str) -> Tuple:
             return base, quote
 
     logger.error(f"[split_pair] Not able to split {pair} on {seperators}")
+
+
+def length_string_to_seconds(length: str) -> int:
+
+    # Extract quantity and unit
+    quantity = int(length[:-1])
+    unit = length[-1]
+
+    # Determine multiplier based on unit
+    try:
+        multiplier = {"S": 1, "M": 60, "H": 3600, "D": 86400}[unit]
+    except KeyError:
+        raise ValueError(
+            f"[length_string_to_seconds] length argument {length} unit {unit} not supported"
+        )
+
+    return quantity * multiplier
 
 
 @dataclass
@@ -68,6 +113,7 @@ class Order:
         self.fee = fee
         self.fee_currency = fee_currency
         self.status = "settled"
+
 
 # if __name__ == "__main__":
 

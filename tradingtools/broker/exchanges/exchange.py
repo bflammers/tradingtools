@@ -3,6 +3,7 @@ import asyncio
 from logging import getLogger
 from decimal import Decimal
 from dataclasses import dataclass
+from enum import Enum
 
 import ccxt.async_support as ccxt
 
@@ -12,11 +13,16 @@ from ...utils import Order
 logger = getLogger(__name__)
 
 
+class ExchangeTypes(Enum):
+    dummy = "dummy"
+    binance = "binance"
+
+
 @dataclass
 class ExchangeConfig:
-    type: str
+    type: ExchangeTypes
     backtest: bool
-    credentials: dict = {}
+    credentials: dict = None
     backtest: bool = True
 
 

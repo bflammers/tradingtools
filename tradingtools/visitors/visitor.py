@@ -1,9 +1,21 @@
+from dataclasses import dataclass
+from enum import Enum
+
+
+class AssetVisitorTypes(Enum):
+    dummy = "dummy"
+
+
+@dataclass
+class AssetVisitorConfig:
+    type: AssetVisitorTypes
 
 
 class AbstractAssetVisitor:
+    _config: AssetVisitorConfig
 
-    def __init__(self) -> None:
-        pass
+    def __init__(self, config: AssetVisitorConfig) -> None:
+        self._config = config
 
     def visit_composite_asset(self, asset) -> None:
         raise NotImplementedError
@@ -13,4 +25,3 @@ class AbstractAssetVisitor:
 
     def leave(self) -> None:
         raise NotImplementedError
-

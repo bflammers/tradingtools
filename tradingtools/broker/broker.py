@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from tradingtools.broker.exchanges import exchange
 
 from ..assets import AbstractAsset, CompositeAsset
-from ..utils import Order
+from ..utils import Order, split_pair
 from .fillers import AbstractFillStrategy, FillStrategyConfig, filler_factory
 from .exchanges import AbstractExchange, ExchangeConfig, exchange_factory
 
@@ -19,7 +19,6 @@ logger = getLogger(__name__)
 
 @dataclass
 class BrokerConfig:
-    type: str
     backtest: bool
     filler__config: FillStrategyConfig
     exchange__config: ExchangeConfig
@@ -28,7 +27,7 @@ class BrokerConfig:
 class Broker:
 
     _exchange: AbstractExchange
-    _fillers: Dict[str, AbstractFillStrategy] = []
+    _fillers: Dict[str, AbstractFillStrategy] = {}
 
     def __init__(self, config: BrokerConfig) -> None:
         self._config = config
@@ -36,30 +35,37 @@ class Broker:
         # Factories
         self._exchange = exchange_factory(self._config.exchange__config)
 
-    def _get_or_create_filler(self, asset: AbstractAsset):
+    def _get_or_create_filler(self, market: str, portfolio: CompositeAsset):
 
-        asset_name = asset.get_name()
+        try:
+            return self._fillers[market]
+        except KeyError:
 
-        if asset_name not in self._fillers:
-            self._fillers[asset_name] = filler_factory(
-                asset, self._exchange, self._config.filler__config
+            # Get base and quote assets
+            base, quote = split_pair(market)
+            base_asset = portfolio.get_asset(base)
+            quote_asset = portfolio.get_asset(quote)
+
+            # Create filler for this market
+            self._fillers[market] = filler_factory(
+                base_asset, quote_asset, self._exchange, self._config.filler__config
             )
 
-        return self._fillers[asset_name]
+            return self._fillers[market]
 
     async def fill(
-        self, portfolio: CompositeAsset, opt_quantities: Dict[str, Decimal]
+        self, market_gaps: Dict[str, Decimal], portfolio: CompositeAsset
     ) -> Future:
 
         fill_coroutines = []
 
-        for name, opt_quantity in opt_quantities.items():
+        for market, gap in market_gaps.items():
 
-            # Get or create asset and filler for asset if it does not exist yet
-            asset = portfolio.get_or_create_symbol_asset(name)
-            filler = self._get_or_create_filler(asset)
+            filler = self._get_or_create_filler(market, portfolio)
 
-            # Append to list of coroutines 
-            fill_coroutines.append(filler.fill(opt_quantity))
+            # Append to list of coroutines
+            fill_coroutines.append(filler.fill(gap))
 
-        return asyncio.gather(*fill_coroutines)
+        futures = await asyncio.gather(*fill_coroutines)
+
+        return futures

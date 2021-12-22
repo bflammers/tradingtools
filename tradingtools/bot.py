@@ -1,13 +1,14 @@
 import asyncio
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import List
 from logging import getLogger
 
-from .assets import Prices, CompositeAsset
-from .broker import AbstractBroker, BrokerConfig, broker_factory
+from .assets import CompositeAsset, SymbolAsset
+from .broker import Broker, BrokerConfig
 from .strategies import AbstractStrategy, strategy_factory
-from .data import AbstractDataLoader, dataloader_factory
+from .data import AbstractData, AbstractDataLoader, dataloader_factory
 from .visitors import AbstractAssetVisitor, visitor_factory
 
 
@@ -21,7 +22,7 @@ class BotConfig:
     visitors__config: List[dict]
     broker__config: BrokerConfig
     backtest: bool = True
-    prices__time_tol_sec: float = 180.0
+    assets__time_diff_tol_sec: float = 180.0
 
     def __post_init__(self) -> None:
 
@@ -35,7 +36,6 @@ class BotConfig:
 class Bot:
 
     _config: BotConfig
-    _prices: Prices
     _portfolio: CompositeAsset
     _strategy: AbstractStrategy
     _data_loader: AbstractDataLoader
@@ -44,40 +44,57 @@ class Bot:
     def __init__(self, config: BotConfig) -> None:
 
         self._config = config
-        self._prices = Prices(time_tol_sec=self._config.prices__time_tol_sec)
-        self._portfolio = CompositeAsset("portfolio", self._prices)
+        self._portfolio = CompositeAsset(
+            "portfolio", self._config.assets__time_diff_tol_sec
+        )
+        self._broker = Broker(self._config.broker__config)
 
         # Factories
-        self._broker = broker_factory(self._config.broker__config)
-        self._strategy = strategy_factory[self._config.strategy__config]
-        self._data_loader = dataloader_factory[self._config.data_loader__config]
+        self._strategy = strategy_factory(self._config.strategy__config)
+        self._data_loader = dataloader_factory(self._config.data_loader__config)
         self._visitors = visitor_factory(self._config.visitors__config)
+
+        # TODO: still need a sync method to synchronize assets with exchange state
+
+    def start(self, loop: asyncio.AbstractEventLoop) -> None:
+
+        loop.create_task(self.run())
 
     async def run(self) -> None:
 
-        async for data in self._data_loader():
+        asset = SymbolAsset("EUR/EUR")
+        asset.set_price(Decimal("1"))
+        asset.set_quantity(Decimal("1000"))
+        self._portfolio.add_asset(asset)
+
+        self._create_assets()
+
+        async for data in self._data_loader.load():
 
             # Update prices
-            self._update_prices(data)
+            self._portfolio.update_prices(data.get_latest())
 
             # Apply visitors
             self._visit_portfolio()
 
-            # Evaluate strategy, results in optimal quantities
-            opt_quantities = self._strategy.evaluate(data, self._portfolio)
+            # Evaluate strategy, results in the gaps that need to be filled on
+            # different markets to top up to assets to the uptimal quantities
+            market_gaps = self._strategy.evaluate(data, self._portfolio)
 
-            # Make orders to fill portfolio up to optimal positions
-            await self._broker.fill(self._portfolio, opt_quantities)
+            # Make orders to fill market gaps in portfolio
+            await self._broker.fill(market_gaps, self._portfolio)
 
     def _visit_portfolio(self) -> None:
         for visitor in self._visitors:
             self._portfolio.accept(visitor)
             visitor.leave()
 
-    def _update_prices(self, data) -> None:
-        latest_prices = data.get_latest()
-        for (
-            symbol,
-            price,
-        ) in latest_prices:
-            self._prices.update(symbol, price)
+    def _create_assets(self) -> None:
+
+        # TODO: make this create assets for every asset, not for every pair
+        for pair in self._data_loader.get_pairs():
+
+            if not self._portfolio.get_asset(pair):
+                logger.info(f"[Bot] creating asset {pair}")
+                asset = SymbolAsset(pair, self._config.assets__time_diff_tol_sec)
+                self._portfolio.add_asset(asset)

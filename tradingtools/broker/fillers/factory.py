@@ -1,4 +1,4 @@
-from .filler import AbstractFillStrategy, FillStrategyConfig
+from .filler import AbstractFillStrategy, FillStrategyConfig, FillerTypes
 from .marketorder import MarketOrderFillStrategy
 
 from ..exchanges import AbstractExchange
@@ -9,7 +9,7 @@ def filler_factory(
     asset: SymbolAsset, exchange: AbstractExchange, config: FillStrategyConfig
 ) -> AbstractFillStrategy:
 
-    if config.type == "market":
+    if config.type is FillerTypes.marketorder:
         return MarketOrderFillStrategy(asset, exchange, config)
     else:
         raise NotImplementedError(

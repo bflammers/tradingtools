@@ -2,29 +2,40 @@ from decimal import Decimal
 from typing import AsyncIterator, List
 from logging import getLogger
 from dataclasses import dataclass
+from enum import Enum
 
 from ..exchanges import AbstractExchange
-from ...utils import Order
+from ...utils import Order, split_pair
 from ...assets import SymbolAsset
 
 logger = getLogger(__name__)
 
 
+class FillerTypes(Enum):
+    marketorder = "marketorder"
+
+
 @dataclass
 class FillStrategyConfig:
-    type: str
+    type: FillerTypes
     difference_tol_EUR: Decimal = Decimal("1")
 
 
 class AbstractFillStrategy:
-    _asset: SymbolAsset
+    _base_asset: SymbolAsset
+    _quote_asset: SymbolAsset
     _exchange: AbstractExchange
     _config: FillStrategyConfig
 
     def __init__(
-        self, asset: SymbolAsset, exchange: AbstractExchange, config: FillStrategyConfig
+        self,
+        base_asset: SymbolAsset,
+        quote_asset: SymbolAsset,
+        exchange: AbstractExchange,
+        config: FillStrategyConfig,
     ) -> None:
-        self._asset = asset
+        self._base_asset = base_asset
+        self._quote_asset = quote_asset
         self._exchange = exchange
         self._config = config
 
@@ -38,14 +49,17 @@ class AbstractFillStrategy:
             settled_order = self._exchange.settle_order(order, order_response)
 
             # Update assets
-            new_quantity = self._asset.get_value() + settled_order.amount_settlement
-            self._asset.set_quantity(new_quantity)
+            # TODO: make this transactional
+            base_new = self._base_asset.get_quantity() + settled_order.amount_settlement
+            quote_new = self._quote_asset.get_quantity() - settled_order.cost
+            self._base_asset.set_quantity(base_new)
+            self._quote_asset.set_quantity(quote_new)
 
     def _check_tolerance(self, price_diff: Decimal):
 
-        if price_diff < self._config.difference_tol_EUR:
+        if abs(price_diff) < self._config.difference_tol_EUR:
             logger.info(
-                f"[FillStrategy] price diff of {price_diff} below tolerance for {self._asset.get_name()}"
+                f"[FillStrategy] price diff of {price_diff} below tolerance for {self._base_asset.get_name()}"
             )
             return False
 

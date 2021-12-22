@@ -1,3 +1,3 @@
 
-from base import AbstractStrategy
-from factory import strategy_factory
+from .strategy import AbstractStrategy, StrategyConfig, StrategyTypes
+from .factory import strategy_factory

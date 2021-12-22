@@ -15,12 +15,12 @@ class MarketOrderFillStrategy(AbstractFillStrategy):
     async def _generate_orders(self, opt_quantity: Decimal) -> AsyncIterator[Order]:
 
         # Calculate difference, check if exceeds tolerance
-        quantity_diff, price_diff = self._asset.get_difference(opt_quantity)
+        quantity_diff, value_diff = self._base_asset.get_difference(opt_quantity)
 
-        while self._check_tolerance(price_diff):
+        while self._check_tolerance(value_diff):
 
             order = Order(
-                symbol=self._asset.get_name(),
+                symbol=self._base_asset.get_name(),
                 side="buy" if quantity_diff > Decimal("0.0") else "sell",
                 amount=quantity_diff,
                 type="market",
@@ -28,4 +28,4 @@ class MarketOrderFillStrategy(AbstractFillStrategy):
 
             yield order
 
-            quantity_diff, price_diff = self._asset.get_difference(opt_quantity)
+            quantity_diff, value_diff = self._base_asset.get_difference(opt_quantity)

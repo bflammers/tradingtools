@@ -1,2 +1,2 @@
 
-from broker import Broker, BrokerConfig
+from .broker import Broker, BrokerConfig
