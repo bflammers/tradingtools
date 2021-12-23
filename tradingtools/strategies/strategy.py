@@ -3,7 +3,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Dict
 
-from ..assets import CompositeAsset
+from ..assets import PortfolioAsset
 from ..data import AbstractData
 
 
@@ -25,7 +25,7 @@ class AbstractStrategy:
         self._config = config
 
     def evaluate(
-        self, data: AbstractData, assets: CompositeAsset
+        self, data: AbstractData, assets: PortfolioAsset
     ) -> Dict[str, Decimal]:
 
         # Determin optimal proportions
@@ -35,19 +35,22 @@ class AbstractStrategy:
         # Convert to quantities
         quantities = self._to_quantities(proportions, assets)
 
+
+        market_gaps = self._to_market_gaps(quantities)
+
         # Smooth quantities signal to avoid too many jumps
-        smooth_quantities = self.smooth_quantities(quantities, assets)
+        smooth_gaps = self.smooth_quantities(market_gaps, assets)
 
         # TODO: make this output a market gaps dict
         return smooth_quantities
 
     def optimal_proportions(
-        self, data: AbstractData, assets: CompositeAsset
+        self, data: AbstractData, assets: PortfolioAsset
     ) -> Dict[str, Decimal]:
         raise NotImplementedError
 
     def smooth_quantities(
-        self, quantities: Dict[str, Decimal], assets: CompositeAsset = None
+        self, quantities: Dict[str, Decimal], assets: PortfolioAsset = None
     ) -> Dict[str, Decimal]:
 
         for pair, quantity in quantities.items():
@@ -88,7 +91,7 @@ class AbstractStrategy:
 
     @staticmethod
     def _to_quantities(
-        proportions: Dict[str, Decimal], assets: CompositeAsset
+        proportions: Dict[str, Decimal], assets: PortfolioAsset
     ) -> Dict[str, Decimal]:
 
         total_value = assets.get_value()

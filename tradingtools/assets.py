@@ -9,18 +9,21 @@ from .utils import split_pair
 
 logger = getLogger(__name__)
 
+# TODO: implement transaction with rollback
 
-class AbstractAsset:
+
+class AbstractCompositeAsset:
 
     _name: str
     _price_update_time: time
     _time_diff_tol_sec: float
-    _price: Decimal = None
+    _default_quote: str
     _quantity: Decimal = None
 
-    def __init__(self, name: str, time_diff_tol_sec: float = 120.0) -> None:
+    def __init__(self, name: str, default_quote: str, time_diff_tol_sec: float = 120.0) -> None:
         self._id = uuid4().hex
         self._name = name
+        self._default_quote = default_quote
         self._time_diff_tol_sec = time_diff_tol_sec
 
     def get_name(self) -> str:
@@ -32,45 +35,46 @@ class AbstractAsset:
     def get_quantity(self) -> Decimal:
         return self._quantity
 
-    def set_price(self, price: Decimal) -> None:
-        # TODO: adjust this to work with a variable quote asset
+    def set_price(self, price: Decimal, quote: str = None) -> None:
         raise NotImplementedError
 
     def update_prices(self, prices: Dict[str, Decimal]) -> None:
         raise NotImplementedError
 
-    def get_price(self) -> Decimal:
+    def get_price(self, quote: str = None) -> Decimal:
         raise NotImplementedError
 
-    def get_value(self) -> Decimal:
-        price = self.get_price()
-        return self._quantity * price
+    def get_value(self, quote: str = None) -> Decimal:
+        quote = quote or self._default_quote
+        return self._quantity * self.get_price(quote)
 
-    def get_difference(self, quantity: Decimal) -> Tuple[Decimal]:
+    def get_value_difference(self, quantity: Decimal, quote: str) -> Tuple[Decimal]:
+        quote = quote or self._default_quote
         quantity_diff = quantity - self.get_quantity()
-        value_diff = quantity_diff * self.get_price()
-        return quantity_diff, value_diff
+        return quantity_diff * self.get_price(quote)
 
     def accept(self, visitor: AbstractAssetVisitor) -> None:
         raise NotImplementedError
 
 
-class CompositeAsset(AbstractAsset):
+class PortfolioAsset(AbstractCompositeAsset):
 
-    _children: List[AbstractAsset] = []
+    _children: List[AbstractCompositeAsset] = []
     _quantity: Decimal = Decimal("1")
 
     def update_prices(self, prices: Dict[str, Decimal]) -> None:
         for child in self._children:
             child.update_prices(prices)
 
-    def get_price(self) -> Decimal:
-        return self.get_value()
+    def get_price(self, quote: str = None) -> Decimal:
+        quote = quote or self._default_quote
+        return self.get_value(quote)
 
-    def get_value(self) -> Decimal:
+    def get_value(self, quote: str = None) -> Decimal:
+        quote = quote or self._default_quote
         value = Decimal("0")
         for child in self._children:
-            value += child.get_value()
+            value += child.get_value(quote)
         return value
 
     def accept(self, visitor: AbstractAssetVisitor) -> None:
@@ -78,11 +82,11 @@ class CompositeAsset(AbstractAsset):
         for child in self._children:
             child.accept(visitor)
 
-    def add_asset(self, asset: AbstractAsset) -> None:
+    def add_asset(self, asset: AbstractCompositeAsset) -> None:
         logger.info(f"[CompositeAsset.add_asset] adding asset {asset.get_name()}")
         self._children.append(asset)
 
-    def get_asset(self, name: str) -> AbstractAsset:
+    def get_asset(self, name: str) -> AbstractCompositeAsset:
 
         for child in self._children:
             if child.get_name() == name:
@@ -92,37 +96,43 @@ class CompositeAsset(AbstractAsset):
         return None
 
 
-class SymbolAsset(AbstractAsset):
+class SymbolAsset(AbstractCompositeAsset):
 
     _quantity: Decimal = Decimal("0")
+    _price: Dict[str, dict] = {}
 
     def set_quantity(self, quantity: Decimal) -> None:
         self._quantity = Decimal(quantity)
 
     def update_prices(self, prices: Dict[str, Decimal]) -> None:
-        new_price = prices[self.get_name()]
-        self.set_price(new_price)
+        for name, price in prices.items():
+            base, quote = split_pair(name)
+            if base == self._name:
+                self.set_price(price, quote)
 
-    def get_price(self) -> Decimal:
+    def get_price(self, quote: str = None) -> Decimal:
 
-        if not self._price:
-            logger.warning(f"[Asset.get_price] price not set for {self._name}")
+        quote = quote or self._default_quote
 
-        time_diff = time() - self._price_update_time
-        if time_diff > self._time_diff_tol_sec:
+        try:
+            price_dict = self._price[quote]
+        except KeyError:
+            logger.warning(f"[Asset] price not set for {self._name}/{quote}")
+
+        time_diff = time() - price_dict["update_time"]
+        if self._time_diff_tol_sec and time_diff > self._time_diff_tol_sec:
             logger.warning(
-                f"[Prices] asset_name {self._name} not updated for {time_diff} seconds"
+                f"[Asset] price for {self._name}/{quote} not updated for {time_diff} seconds"
             )
 
-        return self._price
+        return price_dict["price"]
 
-    def set_price(self, price: Decimal) -> None:
-        self._price = price
-        self._price_update_time = time()
+    def set_price(self, price: Decimal, quote: str) -> None:
+        self._price[quote] = {"price": price, "update_time": time()}
 
-    def get_value(self) -> Decimal:
-        price = self.get_price()
-        return self._quantity * price
+    def get_value(self, quote: str = None) -> Decimal:
+        quote = quote or self._default_quote
+        return self._quantity * self.get_price(quote)
 
     def accept(self, visitor: AbstractAssetVisitor) -> None:
         visitor.visit_symbol_asset(self)

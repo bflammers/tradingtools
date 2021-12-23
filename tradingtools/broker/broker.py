@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from tradingtools.broker.exchanges import exchange
 
-from ..assets import AbstractAsset, CompositeAsset
+from ..assets import AbstractCompositeAsset, PortfolioAsset
 from ..utils import Order, split_pair
 from .fillers import AbstractFillStrategy, FillStrategyConfig, filler_factory
 from .exchanges import AbstractExchange, ExchangeConfig, exchange_factory
@@ -24,6 +24,7 @@ class BrokerConfig:
     exchange__config: ExchangeConfig
 
 
+# TODO: still need a sync method to synchronize assets with exchange state
 class Broker:
 
     _exchange: AbstractExchange
@@ -35,7 +36,7 @@ class Broker:
         # Factories
         self._exchange = exchange_factory(self._config.exchange__config)
 
-    def _get_or_create_filler(self, market: str, portfolio: CompositeAsset):
+    def _get_or_create_filler(self, market: str, portfolio: PortfolioAsset):
 
         try:
             return self._fillers[market]
@@ -54,7 +55,7 @@ class Broker:
             return self._fillers[market]
 
     async def fill(
-        self, market_gaps: Dict[str, Decimal], portfolio: CompositeAsset
+        self, market_gaps: Dict[str, Decimal], portfolio: PortfolioAsset
     ) -> Future:
 
         fill_coroutines = []

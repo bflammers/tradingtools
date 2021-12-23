@@ -4,6 +4,7 @@ from logging import getLogger
 from decimal import Decimal
 from dataclasses import dataclass
 from enum import Enum
+from datetime import datetime
 
 import ccxt.async_support as ccxt
 
@@ -68,7 +69,7 @@ class AbstractExchange:
             symbol=order.symbol,
             type=order.type,
             side=order.side,
-            amount=order.amount,
+            amount=order.quantity,
             price=order.price,
             params=params,
         )
@@ -77,15 +78,18 @@ class AbstractExchange:
 
         return order_response
 
-    def settle_order(self, order: Order, order_response: dict):
+    def update_order(self, order: Order, order_response: dict):
 
-        order.settle(
+        order.update(
             price=Decimal(order_response["price"]),
-            amount=Decimal(order_response["amount"]),
-            timestamp=order_response["datetime"],
+            cost=Decimal(order_response["cost"]),
+            timestamp=datetime.fromtimestamp(order_response["timestamp"] / 1000),
+            filled_quantity=Decimal(order_response["filled"]),
             exchange_order_id=order_response["id"],
             fee=Decimal(order_response["fee"]["cost"]),
             fee_currency=order_response["fee"]["currency"],
+            trades=order_response["trades"],
+            status=order_response["status"],
         )
 
         return order

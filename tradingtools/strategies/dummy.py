@@ -3,13 +3,13 @@ from typing import Dict
 from random import uniform
 
 from .strategy import AbstractStrategy, StrategyConfig
-from ..assets import CompositeAsset
+from ..assets import PortfolioAsset
 from ..data import AbstractData
 
 
 class DummyStrategy(AbstractStrategy):
     def optimal_proportions(
-        self, data: AbstractData, assets: CompositeAsset
+        self, data: AbstractData, assets: PortfolioAsset
     ) -> Dict[str, Decimal]:
 
         pairs = data.get_pairs()

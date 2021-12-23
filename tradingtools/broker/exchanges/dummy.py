@@ -22,7 +22,7 @@ class DummyExchange(AbstractExchange):
         await asyncio.sleep(uniform(0.2, 2.0))
         order_response = {
             "price": uniform(10.0, 1000.0),
-            "amount": order.amount,
+            "amount": order.quantity,
             "datetime": datetime.now().isoformat(),
             "id": "123abc",
             "fee": {"cost": uniform(1.0, 10.0), "currency": "EUR"},

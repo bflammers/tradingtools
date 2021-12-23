@@ -77,7 +77,7 @@ class Order:
     # Execution
     symbol: str
     side: str
-    amount: Decimal
+    quantity: Decimal
     type: str
     status: str = "open"
     price: Decimal = None
@@ -85,52 +85,38 @@ class Order:
     order_id: str = uuid4().hex
     # Settlement
     price_settlement: Decimal = None
-    amount_settlement: Decimal = None
+    cost_settlement: Decimal = None
     timestamp_settlement: datetime = None
+    filled_quantity: Decimal = None
     exchange_order_id: str = None
     fee: Decimal = None
     fee_currency: str = None
+    trades: list = None
 
     def __post_init__(self):
 
         if type == "market" and self.price is not None:
             logger.warning("[Broker] order type is market and price is not None")
 
-    def settle(
+    def update(
         self,
         price: Decimal = None,
-        amount: Decimal = None,
+        cost: Decimal = None,
         timestamp: datetime = None,
+        filled_quantity: Decimal = None,
         exchange_order_id: str = None,
         fee: Decimal = None,
         fee_currency: str = None,
+        trades: list = None,
+        status: str = "settled"
     ) -> None:
 
         self.price_settlement = price
-        self.amount_settlement = amount
+        self.cost_settlement = cost
         self.timestamp_settlement = timestamp
+        self.filled_quantity = filled_quantity
         self.exchange_order_id = exchange_order_id
         self.fee = fee
         self.fee_currency = fee_currency
-        self.status = "settled"
-
-
-# if __name__ == "__main__":
-
-#     print(split_pair("BTC-EUR"))
-#     print(split_pair("BTC/EUR"))
-
-#     p = Prices(time_tol_sec=0)
-#     p.update("BTC/EUR", 10)
-#     print(p.data)
-#     print(p.get("BTC-EUR"))
-#     p.update("BTC-EUR", 12)
-#     print(p.get("BTC/EUR"))
-
-#     p.update("BTC/USD", 5)
-#     p.update("ETH/EUR", 6)
-
-#     data = p.data
-#     print(data)
-
-#     p.get("BTC-AAA")
+        self.trades = trades
+        self.status = status

@@ -5,7 +5,9 @@ from decimal import Decimal
 from typing import List
 from logging import getLogger
 
-from .assets import CompositeAsset, SymbolAsset
+from tradingtools.utils import split_pair
+
+from .assets import PortfolioAsset, SymbolAsset
 from .broker import Broker, BrokerConfig
 from .strategies import AbstractStrategy, strategy_factory
 from .data import AbstractData, AbstractDataLoader, dataloader_factory
@@ -22,6 +24,8 @@ class BotConfig:
     visitors__config: List[dict]
     broker__config: BrokerConfig
     backtest: bool = True
+    default_quote_symbol: str = "USDT"
+    default_quote_starting_capital: Decimal = Decimal("1000")
     assets__time_diff_tol_sec: float = 180.0
 
     def __post_init__(self) -> None:
@@ -36,7 +40,7 @@ class BotConfig:
 class Bot:
 
     _config: BotConfig
-    _portfolio: CompositeAsset
+    _portfolio: PortfolioAsset
     _strategy: AbstractStrategy
     _data_loader: AbstractDataLoader
     _visitors: List[AbstractAssetVisitor]
@@ -44,7 +48,7 @@ class Bot:
     def __init__(self, config: BotConfig) -> None:
 
         self._config = config
-        self._portfolio = CompositeAsset(
+        self._portfolio = PortfolioAsset(
             "portfolio", self._config.assets__time_diff_tol_sec
         )
         self._broker = Broker(self._config.broker__config)
@@ -54,18 +58,11 @@ class Bot:
         self._data_loader = dataloader_factory(self._config.data_loader__config)
         self._visitors = visitor_factory(self._config.visitors__config)
 
-        # TODO: still need a sync method to synchronize assets with exchange state
-
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
 
         loop.create_task(self.run())
 
     async def run(self) -> None:
-
-        asset = SymbolAsset("EUR/EUR")
-        asset.set_price(Decimal("1"))
-        asset.set_quantity(Decimal("1000"))
-        self._portfolio.add_asset(asset)
 
         self._create_assets()
 
@@ -91,10 +88,44 @@ class Bot:
 
     def _create_assets(self) -> None:
 
-        # TODO: make this create assets for every asset, not for every pair
-        for pair in self._data_loader.get_pairs():
+        # Add all base asset present in dataloader
+        self._create_base_assets()
 
-            if not self._portfolio.get_asset(pair):
-                logger.info(f"[Bot] creating asset {pair}")
-                asset = SymbolAsset(pair, self._config.assets__time_diff_tol_sec)
+        # Add asset for default quote symbol
+        if self._config.default_quote_symbol:
+            self._create_default_quote_asset()
+
+    def _create_base_assets(self):
+
+        # Add assets for all base symbols
+        for pair in self._data_loader.get_pairs():
+            base, _ = split_pair(pair)
+
+            if not self._portfolio.get_asset(base):
+                logger.info(f"[Bot] creating asset {base}")
+                asset = SymbolAsset(
+                    name=base,
+                    default_quote=self._config.default_quote_symbol,
+                    time_diff_tol_sec=self._config.assets__time_diff_tol_sec,
+                )
                 self._portfolio.add_asset(asset)
+
+    def _create_default_quote_asset(self):
+
+        logger.info(
+            f"[Bot] creating default quote asset {self._config.default_quote_symbol}"
+        )
+        asset = SymbolAsset(
+            name=self._config.default_quote_symbol,
+            default_quote=self._config.default_quote_symbol,
+            time_diff_tol_sec=None,
+        )
+
+        # Defined as unit measure
+        asset.set_price(Decimal("1.0"))
+
+        # If backtest, add starting capital
+        if self._config.backtest:
+            asset.set_quantity(self._config.default_quote_starting_capital)
+            
+        self._portfolio.add_asset(asset)
