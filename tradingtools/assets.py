@@ -13,21 +13,21 @@ logger = getLogger(__name__)
 
 
 class AbstractCompositeAsset:
-
-    _name: str
-    _price_update_time: time
-    _time_diff_tol_sec: float
-    _default_quote: str
-    _quantity: Decimal = None
-
-    def __init__(self, name: str, default_quote: str, time_diff_tol_sec: float = 120.0) -> None:
+    def __init__(
+        self, name: str, default_quote: str, time_diff_tol_sec: float = 120.0
+    ) -> None:
         self._id = uuid4().hex
         self._name = name
         self._default_quote = default_quote
         self._time_diff_tol_sec = time_diff_tol_sec
+        self._quantity: Decimal = None
+        self._price_update_time: time = None
 
     def get_name(self) -> str:
         return self._name
+
+    def get_asset_names(self) -> List[str]:
+        raise NotImplementedError
 
     def set_quantity(self, quantity: Decimal) -> None:
         raise NotImplementedError
@@ -53,14 +53,23 @@ class AbstractCompositeAsset:
         quantity_diff = quantity - self.get_quantity()
         return quantity_diff * self.get_price(quote)
 
+    def get_market(self, quote: str = None) -> str:
+        raise NotImplementedError
+
     def accept(self, visitor: AbstractAssetVisitor) -> None:
         raise NotImplementedError
 
 
 class PortfolioAsset(AbstractCompositeAsset):
+    def __init__(
+        self, name: str, default_quote: str, time_diff_tol_sec: float = 120
+    ) -> None:
+        super().__init__(name, default_quote, time_diff_tol_sec=time_diff_tol_sec)
+        self._children: List[AbstractCompositeAsset] = []
+        self._quantity: Decimal = Decimal("1")
 
-    _children: List[AbstractCompositeAsset] = []
-    _quantity: Decimal = Decimal("1")
+    def get_asset_names(self) -> List[str]:
+        return [child.get_name() for child in self._children]
 
     def update_prices(self, prices: Dict[str, Decimal]) -> None:
         for child in self._children:
@@ -95,13 +104,29 @@ class PortfolioAsset(AbstractCompositeAsset):
         logger.warning(f"[CompositeAsset.get_asset] no child with name {name}")
         return None
 
+    def __repr__(self) -> str:
+        summary = f"Total value: {self.get_value():.3f} {self._default_quote}\n"
+        for child in self._children:
+            summary += child.__repr__()
+        return summary
+
 
 class SymbolAsset(AbstractCompositeAsset):
-
-    _quantity: Decimal = Decimal("0")
-    _price: Dict[str, dict] = {}
+    def __init__(
+        self, name: str, default_quote: str, time_diff_tol_sec: float = 120
+    ) -> None:
+        super().__init__(name, default_quote, time_diff_tol_sec=time_diff_tol_sec)
+        self._price: Dict[str, dict] = {}
+        self._quantity: Decimal = Decimal("0")
 
     def set_quantity(self, quantity: Decimal) -> None:
+        if quantity < Decimal("0"):
+            message = (
+                f"[Asset] cannot set negative quantity {quantity} for {self._name}"
+            )
+            logger.error(message)
+            raise Exception(message)
+
         self._quantity = Decimal(quantity)
 
     def update_prices(self, prices: Dict[str, Decimal]) -> None:
@@ -118,6 +143,7 @@ class SymbolAsset(AbstractCompositeAsset):
             price_dict = self._price[quote]
         except KeyError:
             logger.warning(f"[Asset] price not set for {self._name}/{quote}")
+            return None
 
         time_diff = time() - price_dict["update_time"]
         if self._time_diff_tol_sec and time_diff > self._time_diff_tol_sec:
@@ -127,12 +153,37 @@ class SymbolAsset(AbstractCompositeAsset):
 
         return price_dict["price"]
 
-    def set_price(self, price: Decimal, quote: str) -> None:
+    def set_price(self, price: Decimal, quote: str = None) -> None:
+        if price < Decimal("0"):
+            message = f"[Asset] cannot set negative price {price} for {self._name}"
+            logger.error(message)
+            raise Exception(message)
+
+        quote = quote or self._default_quote
         self._price[quote] = {"price": price, "update_time": time()}
 
     def get_value(self, quote: str = None) -> Decimal:
         quote = quote or self._default_quote
         return self._quantity * self.get_price(quote)
 
+    def get_market(self, quote: str = None) -> str:
+        quote = quote or self._default_quote
+
+        if not quote:
+            logger.warning(
+                f"[SymbolAsset.get_default_market] no default quote for {self._name}"
+            )
+
+        return f"{self._name}/{self._default_quote}"
+
     def accept(self, visitor: AbstractAssetVisitor) -> None:
         visitor.visit_symbol_asset(self)
+
+    def __repr__(self) -> str:
+        summary = f"-- {self.get_name():<7}"
+        summary += f" >> {'quantity: ':<10}{round(self.get_quantity(), 5):>12} "
+        summary += (
+            f" >> {'price: ':<10}{round(self.get_price(), 3):>8} {self._default_quote}"
+        )
+        summary += f" >> {'value: ':<10}{round(self.get_value(), 3):>8} {self._default_quote}\n"
+        return summary

@@ -12,10 +12,9 @@ class AssetVisitorConfig:
 
 
 class AbstractAssetVisitor:
-    _config: AssetVisitorConfig
 
     def __init__(self, config: AssetVisitorConfig) -> None:
-        self._config = config
+        self._config: AssetVisitorConfig = config
 
     def visit_composite_asset(self, asset) -> None:
         raise NotImplementedError

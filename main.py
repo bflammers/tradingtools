@@ -15,15 +15,18 @@ from tradingtools.data import dataloader
 from tradingtools.utils import setup_signal_handlers
 
 
-logging.basicConfig(level=logging.DEBUG)
+# Set up logging
+terminal_handler = logging.StreamHandler()
+terminal_handler.setFormatter(utils.ColoredLogFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[terminal_handler])
 
 
 config = bot.BotConfig(
     strategy__config=strategies.StrategyConfig(type=strategies.StrategyTypes.dummy),
     data_loader__config=dataloader.DataLoaderConfig(
         type=dataloader.DataLoaderTypes.dummy,
-        pairs=["BTC-EUR", "ETH-EUR"],
-        interval_length="2S",
+        pairs=["BTC/USDT", "ETH/USDT"],
+        interval_length="5S",
     ),
     visitors__config=[],
     broker__config=broker.BrokerConfig(

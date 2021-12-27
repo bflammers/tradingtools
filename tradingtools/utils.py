@@ -1,11 +1,12 @@
 import sys
 import signal
+import logging
 
-from logging import getLogger
+from enum import Enum
 from typing import Tuple
 from dataclasses import dataclass
 from decimal import Decimal
-from datetime import datetime
+from time import time
 from uuid import uuid4
 
 
@@ -17,7 +18,38 @@ try:
 except ImportError:
     SIGNALS = (signal.SIGABRT, signal.SIGINT, signal.SIGTERM)
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
+
+
+class Colors(Enum):
+    blue = '\033[94m'
+    cyan = '\033[96m'
+    green = '\033[92m'
+    grey = "\x1b[38;20m"
+    yellow = "\x1b[33;20m"
+    red = "\x1b[31;20m"
+    bold_red = "\x1b[31;1m"
+    reset = "\x1b[0m"
+
+
+class ColoredLogFormatter(logging.Formatter):
+
+    format = (
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
+    )
+
+    FORMATS = {
+        logging.DEBUG: Colors.cyan.value + format + Colors.reset.value,
+        logging.INFO: Colors.grey.value + format + Colors.reset.value,
+        logging.WARNING: Colors.yellow.value + format + Colors.reset.value,
+        logging.ERROR: Colors.red.value + format + Colors.reset.value,
+        logging.CRITICAL: Colors.bold_red.value + format + Colors.reset.value,
+    }
+
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt)
+        return formatter.format(record)
 
 
 def setup_signal_handlers(loop):
@@ -81,12 +113,12 @@ class Order:
     type: str
     status: str = "open"
     price: Decimal = None
-    timestamp_created: datetime = datetime.now()
-    order_id: str = uuid4().hex
+    timestamp_created: float = None
+    order_id: str = None
     # Settlement
     price_settlement: Decimal = None
     cost_settlement: Decimal = None
-    timestamp_settlement: datetime = None
+    timestamp_settlement: float = None
     filled_quantity: Decimal = None
     exchange_order_id: str = None
     fee: Decimal = None
@@ -95,20 +127,26 @@ class Order:
 
     def __post_init__(self):
 
-        if type == "market" and self.price is not None:
-            logger.warning("[Broker] order type is market and price is not None")
+        if self.timestamp_created is None:
+            self.timestamp_created = time()
+
+        if self.order_id is None:
+            self.order_id = uuid4().hex
+
+        if self.type == "market" and self.price is not None:
+            logger.debug("[Broker] order type is market and price is not None")
 
     def update(
         self,
         price: Decimal = None,
         cost: Decimal = None,
-        timestamp: datetime = None,
+        timestamp: float = None,
         filled_quantity: Decimal = None,
         exchange_order_id: str = None,
         fee: Decimal = None,
         fee_currency: str = None,
         trades: list = None,
-        status: str = "settled"
+        status: str = "settled",
     ) -> None:
 
         self.price_settlement = price

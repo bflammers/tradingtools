@@ -2,9 +2,15 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from typing import Dict
+from logging import getLogger
+
+from tradingtools.utils import split_pair
 
 from ..assets import PortfolioAsset
 from ..data import AbstractData
+
+
+logger = getLogger(__name__)
 
 
 class StrategyTypes(Enum):
@@ -19,93 +25,98 @@ class StrategyConfig:
 
 
 class AbstractStrategy:
-    _config: StrategyConfig
-
     def __init__(self, config: StrategyConfig) -> None:
-        self._config = config
+        self._config: StrategyConfig = config
 
     def evaluate(
-        self, data: AbstractData, assets: PortfolioAsset
+        self, data: AbstractData, portfolio: PortfolioAsset
     ) -> Dict[str, Decimal]:
 
-        # Determin optimal proportions
-        proportions = self.optimal_proportions(data, assets)
+        # Determine optimal proportions
+        proportions = self.optimal_proportions(data, portfolio)
         self._check_proportions(proportions)
 
-        # Convert to quantities
-        quantities = self._to_quantities(proportions, assets)
+        # Pick which markets to buy/sell the assets on
+        market_quantities = self.market_quantities(proportions, portfolio)
 
-
-        market_gaps = self._to_market_gaps(quantities)
-
-        # Smooth quantities signal to avoid too many jumps
-        smooth_gaps = self.smooth_quantities(market_gaps, assets)
-
-        # TODO: make this output a market gaps dict
-        return smooth_quantities
+        return market_quantities
 
     def optimal_proportions(
-        self, data: AbstractData, assets: PortfolioAsset
+        self, data: AbstractData, portfolio: PortfolioAsset
     ) -> Dict[str, Decimal]:
         raise NotImplementedError
-
-    def smooth_quantities(
-        self, quantities: Dict[str, Decimal], assets: PortfolioAsset = None
-    ) -> Dict[str, Decimal]:
-
-        for pair, quantity in quantities.items():
-
-            asset = assets.get_asset(pair)
-
-            # Avoiding lots of small assets - check if value diff from zero
-            # is higher than threshold. If not, smooth to zero
-            _, value_diff = asset.get_difference(Decimal("0.0"))
-            if abs(value_diff) < self._config.smooth_value_base_thr:
-                quantities[pair] = Decimal("0.0")
-
-            # Avoiding many small orders - check if value diff from current
-            # is higher than threshold. If not, smooth to current quantity
-            _, value_diff = asset.get_difference(quantity)
-            if abs(value_diff) < self._config.smooth_value_diff_thr:
-                quantities[pair] = asset.get_quantity()
-
-        return quantities
 
     @staticmethod
     def _check_proportions(proportions: Dict[str, Decimal]) -> None:
 
-        total = 0
-        for pair, proportion in proportions.items():
+        total = Decimal("0")
+        for name, proportion in proportions.items():
 
             if proportion < Decimal("0") or proportion > Decimal("1"):
-                raise ValueError(
-                    f"[Strategy] proportion of {proportion} for {pair} not >= 0 and <= 1"
+                logger.error(
+                    f"[Strategy] proportion of {proportion} for {name} not >= 0 and <= 1"
                 )
 
             total += proportion
+
+        # Round to avoid a total > 1, due to float representation
+        total = round(total, 5)
 
         if total < Decimal("0") or total > Decimal("1"):
             raise ValueError(
                 f"[Strategy] total of proportions is {total}, not >= 0 and <= 1"
             )
 
-    @staticmethod
-    def _to_quantities(
-        proportions: Dict[str, Decimal], assets: PortfolioAsset
+    def _smooth_quantities(
+        self, quantities: Dict[str, Decimal], portfolio: PortfolioAsset = None
     ) -> Dict[str, Decimal]:
 
-        total_value = assets.get_value()
+        for pair, quantity in quantities.items():
+
+            base, quote = split_pair(pair)
+            asset = portfolio.get_asset(base)
+
+            # Avoiding lots of small assets - check if value diff from zero
+            # is higher than threshold. If not, smooth to zero
+            value = asset.get_price(quote) * quantity
+            if abs(value) < self._config.smooth_value_base_thr:
+                quantities[pair] = Decimal("0.0")
+
+            # Avoiding many small orders - check if value diff from current
+            # is higher than threshold. If not, smooth to current quantity
+            value_diff = asset.get_value_difference(quantity, quote)
+            if abs(value_diff) < self._config.smooth_value_diff_thr:
+                quantities[pair] = asset.get_quantity()
+
+        return quantities
+
+    def market_quantities(
+        self, proportions: Dict[str, Decimal], portfolio: PortfolioAsset
+    ) -> Dict[str, Decimal]:
+
+        total_value = portfolio.get_value()
 
         quantities = {}
-        for pair, proportion in proportions.items():
+        for base, proportion in proportions.items():
 
-            # Determine value that should be allocated in this asset
+            # Get asset, determine market
+            asset = portfolio.get_asset(base)
+            market = asset.get_market()
+            _, quote = split_pair(market)
+
+            # Don't generate an order when default quote
+            if base == quote:
+                continue
+
+            # Determine value to allocated in this asset, corresponding quantity
             share_value = total_value * proportion
+            target_quantity = share_value / asset.get_price(quote)
 
-            # Determine corresponding quantity
-            price = assets.get_asset(pair).get_price()
-            quantity = share_value / price
+            # Determine quantity difference, add to dict
+            quantity_diff = target_quantity - asset.get_quantity()
+            quantities[market] = quantity_diff
 
-            quantities[pair] = quantity
+        # Smooth quantities to avoid many small jumps
+        quantities = self._smooth_quantities(quantities, portfolio)
 
         return quantities

@@ -28,10 +28,10 @@ class BrokerConfig:
 class Broker:
 
     _exchange: AbstractExchange
-    _fillers: Dict[str, AbstractFillStrategy] = {}
 
     def __init__(self, config: BrokerConfig) -> None:
-        self._config = config
+        self._config: BrokerConfig = config
+        self._fillers: Dict[str, AbstractFillStrategy] = {}
 
         # Factories
         self._exchange = exchange_factory(self._config.exchange__config)
@@ -49,7 +49,10 @@ class Broker:
 
             # Create filler for this market
             self._fillers[market] = filler_factory(
-                base_asset, quote_asset, self._exchange, self._config.filler__config
+                config=self._config.filler__config,
+                base_asset=base_asset,
+                quote_asset=quote_asset,
+                exchange=self._exchange,
             )
 
             return self._fillers[market]

@@ -38,25 +38,26 @@ class BotConfig:
 
 
 class Bot:
-
-    _config: BotConfig
-    _portfolio: PortfolioAsset
-    _strategy: AbstractStrategy
-    _data_loader: AbstractDataLoader
-    _visitors: List[AbstractAssetVisitor]
-
     def __init__(self, config: BotConfig) -> None:
 
-        self._config = config
-        self._portfolio = PortfolioAsset(
-            "portfolio", self._config.assets__time_diff_tol_sec
+        self._config: BotConfig = config
+        self._portfolio: PortfolioAsset = PortfolioAsset(
+            name="portfolio",
+            default_quote=self._config.default_quote_symbol,
+            time_diff_tol_sec=self._config.assets__time_diff_tol_sec,
         )
         self._broker = Broker(self._config.broker__config)
 
         # Factories
-        self._strategy = strategy_factory(self._config.strategy__config)
-        self._data_loader = dataloader_factory(self._config.data_loader__config)
-        self._visitors = visitor_factory(self._config.visitors__config)
+        self._strategy: AbstractStrategy = strategy_factory(
+            self._config.strategy__config
+        )
+        self._data_loader: AbstractDataLoader = dataloader_factory(
+            self._config.data_loader__config
+        )
+        self._visitors: List[AbstractAssetVisitor] = visitor_factory(
+            self._config.visitors__config
+        )
 
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
 
@@ -69,7 +70,8 @@ class Bot:
         async for data in self._data_loader.load():
 
             # Update prices
-            self._portfolio.update_prices(data.get_latest())
+            prices = data.get_latest()
+            self._portfolio.update_prices(prices)
 
             # Apply visitors
             self._visit_portfolio()
@@ -81,6 +83,9 @@ class Bot:
             # Make orders to fill market gaps in portfolio
             await self._broker.fill(market_gaps, self._portfolio)
 
+            # Log portfolio
+            logger.info(f"\n[Bot] portfolio: {self._portfolio}")
+
     def _visit_portfolio(self) -> None:
         for visitor in self._visitors:
             self._portfolio.accept(visitor)
@@ -88,23 +93,28 @@ class Bot:
 
     def _create_assets(self) -> None:
 
-        # Add all base asset present in dataloader
-        self._create_base_assets()
-
         # Add asset for default quote symbol
         if self._config.default_quote_symbol:
             self._create_default_quote_asset()
 
-    def _create_base_assets(self):
+        # Add all base asset present in dataloader
+        self._create_remaining_assets()
+
+    def _create_remaining_assets(self):
+
+        # Create a set of all (base AND quote) asset names
+        pairs = set()
+        for pair in self._data_loader.get_pairs():
+            base, quote = split_pair(pair)
+            pairs |= {base, quote}
 
         # Add assets for all base symbols
-        for pair in self._data_loader.get_pairs():
-            base, _ = split_pair(pair)
+        for name in pairs:
 
-            if not self._portfolio.get_asset(base):
-                logger.info(f"[Bot] creating asset {base}")
+            if not self._portfolio.get_asset(name):
+                logger.info(f"[Bot] creating asset {name}")
                 asset = SymbolAsset(
-                    name=base,
+                    name=name,
                     default_quote=self._config.default_quote_symbol,
                     time_diff_tol_sec=self._config.assets__time_diff_tol_sec,
                 )
@@ -127,5 +137,5 @@ class Bot:
         # If backtest, add starting capital
         if self._config.backtest:
             asset.set_quantity(self._config.default_quote_starting_capital)
-            
+
         self._portfolio.add_asset(asset)

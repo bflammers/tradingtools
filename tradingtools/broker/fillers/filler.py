@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import AsyncIterator, Dict
+from typing import AsyncIterator, Dict, Tuple
 from logging import getLogger
 from dataclasses import dataclass, field
 from enum import Enum
@@ -29,32 +29,30 @@ class FillStrategyConfig:
 
 
 class AbstractFillStrategy:
-    _base_asset: SymbolAsset
-    _quote_asset: SymbolAsset
-    _exchange: AbstractExchange
-    _config: FillStrategyConfig
-    _market: str
-
     def __init__(
         self,
+        config: FillStrategyConfig,
         base_asset: SymbolAsset,
         quote_asset: SymbolAsset,
         exchange: AbstractExchange,
-        config: FillStrategyConfig,
     ) -> None:
-        self._base_asset = base_asset
-        self._quote_asset = quote_asset
-        self._exchange = exchange
-        self._config = config
-        self._market = f"{self._base_asset.get_name()}/{self._quote_asset.get_name()}"
+        self._config: FillStrategyConfig = config
+        self._base_asset: SymbolAsset = base_asset
+        self._quote_asset: SymbolAsset = quote_asset
+        self._exchange: AbstractExchange = exchange
 
-    async def fill(self, quantity: Decimal) -> None:
+        # Safe base and quote asset names, determine market
+        self._base_name: str = self._base_asset.get_name()
+        self._quote_name: str = self._quote_asset.get_name()
+        self._market: str = f"{self._base_name}/{self._quote_name}"
+
+    async def fill(self, gap: Decimal) -> None:
 
         # Create and place orders, update assets
-        async for order in self._generate_orders(quantity):
+        async for order in self._generate_orders(gap):
 
             # Create and place order with exchange
-            order_response = self._exchange.place_order(order)
+            order_response = await self._exchange.place_order(order)
 
             # Update the local order object
             updated_order = self._exchange.update_order(order, order_response)
@@ -66,9 +64,16 @@ class AbstractFillStrategy:
             self._base_asset.set_quantity(base_new)
             self._quote_asset.set_quantity(quote_new)
 
-    def _check_tolerance(self, price_diff: Decimal):
+    def _continue_order(self, value_diff: Decimal):
 
-        # Get tolerance
+        # Check if there is enough value in quote asset
+        if value_diff > self._quote_asset.get_value():
+            logger.warning(
+                f"[FillStrategy] not enough value in {self._quote_asset.get_name()} to buy {value_diff:0.3f} worth of {self._base_asset.get_name()}"
+            )
+            return False
+
+        # Safe get the tolerance
         quote_name = self._quote_asset.get_name()
         try:
             tolerance = self._config.value_diff_tol_quote[quote_name]
@@ -79,13 +84,18 @@ class AbstractFillStrategy:
             return True
 
         # Compare price difference to tolerance
-        if abs(price_diff) < tolerance:
+        if abs(value_diff) < tolerance:
             logger.info(
-                f"[FillStrategy] price diff of {price_diff} below tolerance for {self._market}"
+                f"[FillStrategy] value diff of {value_diff:0.3f} below tolerance for {self._market}"
             )
             return False
 
         return True
+
+    def _determine_diff(self, target: Decimal, filled: Decimal) -> Tuple[Decimal]:
+        quantity_diff = target - filled
+        value_diff = quantity_diff * self._base_asset.get_price(self._quote_name)
+        return quantity_diff, value_diff
 
     async def _generate_orders(quantity: Decimal) -> AsyncIterator[Order]:
         raise NotImplementedError

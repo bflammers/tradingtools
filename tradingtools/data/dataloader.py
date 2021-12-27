@@ -33,10 +33,9 @@ class DataLoaderConfig:
 
 
 class AbstractData:
-    _config: DataLoaderConfig
 
     def __init__(self, config: DataLoaderConfig) -> None:
-        self._config = config
+        self._config: DataLoaderConfig = config
 
     def get_pairs(self) -> List[str]:
         return self._config.pairs
@@ -49,10 +48,9 @@ class AbstractData:
 
 
 class AbstractDataLoader:
-    _config: DataLoaderConfig
 
     def __init__(self, config: DataLoaderConfig) -> None:
-        self._config = config
+        self._config: DataLoaderConfig = config
 
     def get_pairs(self) -> List[str]:
         return self._config.pairs

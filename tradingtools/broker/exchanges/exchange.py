@@ -1,5 +1,6 @@
 import asyncio
 
+from pprint import pformat
 from logging import getLogger
 from decimal import Decimal
 from dataclasses import dataclass
@@ -29,14 +30,13 @@ class ExchangeConfig:
 
 class AbstractExchange:
 
-    _exchange: ccxt.Exchange
     _exchange_name: str = None
 
     def __init__(self, config: ExchangeConfig) -> None:
         self._config = config
 
         # Factories
-        self._exchange = self._exchange_factory()
+        self._exchange: ccxt.Exchange = self._exchange_factory()
 
         # Checks
         self._live_trading_confirmation()
@@ -74,7 +74,7 @@ class AbstractExchange:
             params=params,
         )
 
-        logger.info(f"[Broker] order {order.order_id} response: {order_response}")
+        logger.debug(f"[Broker] order {order.order_id} response: \n{pformat(order_response)}")
 
         return order_response
 
