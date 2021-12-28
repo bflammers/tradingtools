@@ -48,4 +48,3 @@ class MarketOrderFillStrategy(AbstractFillStrategy):
 
             n_retries += 1
 
-        # TODO: something for cancelling all outstanding orders

@@ -1,6 +1,6 @@
 from logging import getLogger
 
-import ccxt.async_support as ccxt
+from ccxt.async_support import binance
 
 from .exchange import AbstractExchange
 
@@ -13,7 +13,7 @@ class BinanceExchange(AbstractExchange):
     _exchange_name: str = "binance"
 
     def _exchange_factory(self):
-        exchange = ccxt.binance(
+        exchange = binance(
             {
                 "apiKey": self._config.credentials["api_key"],
                 "secret": self._config.credentials["secret_key"],

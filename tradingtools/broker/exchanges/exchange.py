@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
 
-import ccxt.async_support as ccxt
+from ccxt.async_support import Exchange
 
 from ...utils import Order
 
@@ -23,20 +23,20 @@ class ExchangeTypes(Enum):
 @dataclass
 class ExchangeConfig:
     type: ExchangeTypes
-    backtest: bool
     credentials: dict = None
     backtest: bool = True
 
 
 class AbstractExchange:
 
+    exchange: Exchange
     _exchange_name: str = None
 
     def __init__(self, config: ExchangeConfig) -> None:
         self._config = config
 
         # Factories
-        self._exchange: ccxt.Exchange = self._exchange_factory()
+        self.exchange: Exchange = self._exchange_factory()
 
         # Checks
         self._live_trading_confirmation()
@@ -65,7 +65,7 @@ class AbstractExchange:
         logger.info(f"[Broker] placing order {order.order_id}")
 
         # Create market order through ccxt with specified exchange
-        order_response = await self._exchange.create_order(
+        order_response = await self.exchange.create_order(
             symbol=order.symbol,
             type=order.type,
             side=order.side,
@@ -93,3 +93,5 @@ class AbstractExchange:
         )
 
         return order
+
+    # TODO: something for cancelling all outstanding orders

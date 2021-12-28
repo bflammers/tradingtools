@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 class Colors(Enum):
-    blue = '\033[94m'
-    cyan = '\033[96m'
-    green = '\033[92m'
+    blue = "\033[94m"
+    cyan = "\033[96m"
+    green = "\033[92m"
     grey = "\x1b[38;20m"
     yellow = "\x1b[33;20m"
     red = "\x1b[31;20m"
@@ -77,13 +77,13 @@ def split_pair(pair: str) -> Tuple:
         try:
             splitted = pair.split(sep)
             base, quote = splitted[0], splitted[1]
+            return base, quote
         except IndexError:
             pass
 
-        if len(splitted) == 2:
-            return base, quote
-
-    logger.error(f"[split_pair] Not able to split {pair} on {seperators}")
+    message = f"[split_pair] Not able to split {pair} on {seperators}"
+    logger.error(message)
+    raise Exception(message)
 
 
 def length_string_to_seconds(length: str) -> int:
@@ -134,7 +134,10 @@ class Order:
             self.order_id = uuid4().hex
 
         if self.type == "market" and self.price is not None:
-            logger.debug("[Broker] order type is market and price is not None")
+            logger.debug("[Order] order type is market and price is not None")
+
+        if self.type == "limit" and self.price is None:
+            logger.error("[Order] order type is limit and price is None")
 
     def update(
         self,
