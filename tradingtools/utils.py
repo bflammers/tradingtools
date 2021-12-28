@@ -134,10 +134,12 @@ class Order:
             self.order_id = uuid4().hex
 
         if self.type == "market" and self.price is not None:
-            logger.debug("[Order] order type is market and price is not None")
+            logger.warn("[Order] order type is market and price is not None")
 
         if self.type == "limit" and self.price is None:
-            logger.error("[Order] order type is limit and price is None")
+            message = "[Order] order type is limit and price is None"
+            logger.error(message)
+            raise Exception(message)
 
     def update(
         self,

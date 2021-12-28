@@ -1,3 +1,4 @@
+from __future__ import annotations  # For correct typing when returning self
 from logging import getLogger
 from uuid import uuid4
 from decimal import Decimal
@@ -8,8 +9,6 @@ from .visitors import AbstractAssetVisitor
 from .utils import split_pair
 
 logger = getLogger(__name__)
-
-# TODO: implement transaction with rollback
 
 
 class AbstractCompositeAsset:
@@ -187,3 +186,89 @@ class SymbolAsset(AbstractCompositeAsset):
         )
         summary += f" >> {'value: ':<10}{round(self.get_value(), 3):>8} {self._default_quote}\n"
         return summary
+
+
+class AssetTransaction:
+    def __init__(self) -> None:
+        self.sub_transactions: List[Tuple[AbstractCompositeAsset, Decimal]] = []
+        self.rollback_quantities: List[Decimal] = []
+
+    def add(self, asset: AbstractCompositeAsset, quantity: Decimal) -> AssetTransaction:
+        self._create_sub_transaction(asset, quantity)
+        return self
+
+    def subtract(
+        self, asset: AbstractCompositeAsset, quantity: Decimal
+    ) -> AssetTransaction:
+        self._create_sub_transaction(asset, -quantity)
+        return self
+
+    def _create_sub_transaction(
+        self, asset: AbstractCompositeAsset, quantity: Decimal
+    ) -> AssetTransaction:
+        self.sub_transactions.append((asset, quantity))
+        self.rollback_quantities.append(None)
+
+    def _apply_modification(self, index: int) -> None:
+
+        # Extract asset, and quantities from sub transaction to apply
+        asset, addition_quantity = self.sub_transactions[index]
+        current_quantity = asset.get_quantity()
+
+        # Save current quantity for rollback
+        self.rollback_quantities[index] = current_quantity
+
+        # Set new quantity
+        new_quantity = current_quantity + addition_quantity
+        asset.set_quantity(new_quantity)
+
+        if asset.get_quantity() != new_quantity:
+            raise Exception(
+                f"[AssetTransaction] quantity not correctly set to new value for {asset.get_name()}"
+            )
+
+    def _rollback_modification(self, index: int) -> None:
+
+        # Extract asset, and quantities from sub transaction to apply
+        asset, _ = self.sub_transactions[index]
+        rollback_quantity = self.rollback_quantities[index]
+        asset.set_quantity(rollback_quantity)
+
+        if asset.get_quantity() != rollback_quantity:
+            raise Exception(
+                f"[AssetTransaction] rollback failed for {asset.get_name()}"
+            )
+
+    def _rollback(self, index: int):
+
+        failed = False
+        failed_assets = []
+        for i in range(index, -1, -1):
+
+            try:
+                self._rollback_modification(i)
+            except:
+                failed = True
+                asset = self.sub_transactions[i][0]
+                failed_assets.append(asset.get_name())
+
+        if failed:
+            message = f"[AssetTransaction] rollback failed for assets: {failed_assets}"
+            logger.error(message)
+            raise Exception(message)
+
+    def commit(self):
+
+        for i in range(len(self.sub_transactions)):
+
+            try:
+                self._apply_modification(i)
+            except:
+
+                logger.error(
+                    "[AssetTransaction] transaction failed, attempting rollback"
+                )
+                self._rollback(i)
+                logger.info("[AssetTransaction] rollback successful")
+
+                raise
