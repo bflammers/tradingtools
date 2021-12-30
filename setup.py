@@ -10,7 +10,7 @@ setup(name='tradingtools',
           'cryptofeed[redis]~=2.1.1',
           'ccxt~=1.64.8',
           'numpy~=1.21.4',
-          'polars~=0.11.0'
+          'polars~=0.12.6'
       ],
       packages=['tradingtools'],
       zip_safe=False)

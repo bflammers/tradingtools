@@ -5,7 +5,7 @@ from random import uniform
 
 import polars as pl
 
-from ..utils import length_string_to_seconds
+from ..utils import interval_to_seconds
 from .dataloader import AbstractData, AbstractDataLoader, DataLoaderConfig
 
 
@@ -19,7 +19,7 @@ class DummyData(AbstractData):
     def get_latest(self) -> Dict[str, Decimal]:
         return self._prices
 
-    def get_history(self, interval_length: str, bucket_length: str) -> pl.DataFrame:
+    def get_history(self, interval: str, n_periods: int) -> pl.DataFrame:
         raise NotImplementedError
 
 

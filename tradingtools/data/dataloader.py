@@ -1,39 +1,69 @@
 import asyncio
+from datetime import datetime
 from decimal import Decimal
 import time
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
-from typing import AsyncIterator, List, Dict
+from typing import AsyncIterator, Iterator, List, Dict
 
 import polars as pl
 
-from ..utils import length_string_to_seconds
+from ..utils import interval_to_seconds
 
 
 class DataLoaderTypes(Enum):
     dummy = "dummy"
+    historical = "historical"
 
 
 @dataclass
 class DataLoaderConfig:
     type: DataLoaderTypes
     pairs: List[str]
-    interval_length: str
+    interval: str = "1M"
+    hist__exchange: str = "Binance"
+    hist__parent_path: str = "./data"
+    hist__burn_in_periods: int = 100
+    hist__update_tol_interval: str = "5M"
+    hist__sleep_interval: str = None
+    hist__max_history_interval: str = "100D"
 
-    @property
-    def interval_seconds(self) -> int:
+    def __post_init__(self):
 
-        # When False, empty string or zero return zero
-        if not self.interval_length:
-            return 0
+        # interval_length to interval_seconds
+        if self.interval is None:
+            self.interval_seconds = 0
+        else:
+            self.interval_seconds = interval_to_seconds(self.interval)
 
-        return length_string_to_seconds(self.interval_length)
+        # historical__update_tol_length to historical__update_tol_seconds
+        if self.hist__update_tol_interval is None:
+            self.hist__update_tol_seconds = 0
+        else:
+            self.hist__update_tol_seconds = interval_to_seconds(
+                self.hist__update_tol_interval
+            )
+
+        # sleep interval (overrides interval if set) to seconds
+        if self.hist__sleep_interval is None:
+            self.sleep_seconds = self.interval_seconds
+        else:
+            self.sleep_seconds = interval_to_seconds(
+                self.hist__sleep_interval
+            )
+
+        # historical__history_limit_length to historical__history_limit_seconds
+        if self.hist__max_history_interval is None:
+            self.max_history_seconds = interval_to_seconds("1000D")
+        else:
+            self.max_history_seconds = interval_to_seconds(
+                self.hist__max_history_interval
+            )
 
 
 class AbstractData:
-
     def __init__(self, config: DataLoaderConfig) -> None:
         self._config: DataLoaderConfig = config
 
@@ -43,12 +73,11 @@ class AbstractData:
     def get_latest(self) -> Dict[str, Decimal]:
         raise NotImplementedError
 
-    def get_history(self, interval_length: str, bucket_length: str) -> pl.DataFrame:
+    def get_history(self, interval: str, n_periods: int) -> pl.DataFrame:
         raise NotImplementedError
 
 
 class AbstractDataLoader:
-
     def __init__(self, config: DataLoaderConfig) -> None:
         self._config: DataLoaderConfig = config
 
@@ -58,7 +87,13 @@ class AbstractDataLoader:
     def data_factory(self) -> AbstractData:
         raise NotImplementedError
 
-    async def load(self) -> AsyncIterator[AbstractData]:
+    def _sleep_time(self, start_time: float) -> float:
+
+        t_diff = time.perf_counter() - start_time
+        t_sleep = self._config.sleep_seconds - t_diff
+        return t_sleep
+
+    async def load_async(self) -> AsyncIterator[AbstractData]:
 
         while True:
 
@@ -69,6 +104,24 @@ class AbstractDataLoader:
             yield self.data_factory()
 
             # Determine sleep time and sleep
-            t_diff = time.perf_counter() - t_start
-            t_sleep = self._config.interval_seconds - t_diff
+            t_sleep = self._sleep_time(t_start)
             await asyncio.sleep(t_sleep)
+
+    def load(self) -> Iterator[AbstractData]:
+
+        while True:
+
+            # Starting time - before yielding data and control to eventloop
+            t_start = time.perf_counter()
+
+            # Yield data object
+            data = self.data_factory()
+
+            if data is None:
+                return
+
+            yield data
+
+            # Determine sleep time and sleep
+            t_sleep = self._sleep_time(t_start)
+            time.sleep(t_sleep)

@@ -67,7 +67,7 @@ class Bot:
 
         self._create_assets()
 
-        async for data in self._data_loader.load():
+        async for data in self._data_loader.load_async():
 
             # Update prices
             prices = data.get_latest()

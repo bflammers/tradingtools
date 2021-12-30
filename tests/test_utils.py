@@ -5,6 +5,33 @@ from tradingtools.broker.exchanges import exchange
 import tradingtools.utils as utils
 
 
+class TestFloatToDecimals(unittest.TestCase):
+    def _test_helper(self, argument: float, expected: Decimal, precision: int):
+        result = utils.float_to_decimal(argument, precision)
+        self.assertEqual(result, expected)
+
+    def test_integer(self):
+        # Integer part
+        self._test_helper(101, Decimal("101"), 3)
+        self._test_helper(101.123, Decimal("101.123"), 3)
+        self._test_helper(201.123, Decimal("201.123"), 3)
+
+    def test_decimal(self):
+        # Decimal part
+        self._test_helper(101.0, Decimal("101"), 3)
+        self._test_helper(101.12, Decimal("101.12"), 3)
+        self._test_helper(101.123, Decimal("101.123"), 3)
+        self._test_helper(101.1234, Decimal("101.123"), 3)
+        self._test_helper(101.12345, Decimal("101.123"), 3)
+
+    def test_precision(self):
+        # Precision
+        self._test_helper(101.1234567, Decimal("101"), 0)
+        self._test_helper(101.1234567, Decimal("101.1"), 1)
+        self._test_helper(101.1234567, Decimal("101.12"), 2)
+        self._test_helper(101.1234567, Decimal("101.12346"), 5)
+
+
 class TestSplitPair(unittest.TestCase):
     def test_slash(self):
 
@@ -78,4 +105,3 @@ class TestOrder(unittest.TestCase):
         self.assertEqual(order.price_settlement, 2)
         self.assertEqual(order.cost_settlement, 3)
         self.assertEqual(order.timestamp_settlement, 1000)
-

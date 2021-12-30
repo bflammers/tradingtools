@@ -2,12 +2,15 @@ import sys
 import signal
 import logging
 
+
 from enum import Enum
 from typing import Tuple
 from dataclasses import dataclass
 from decimal import Decimal
 from time import time
 from uuid import uuid4
+from math import log10
+
 
 
 try:
@@ -52,6 +55,29 @@ class ColoredLogFormatter(logging.Formatter):
         return formatter.format(record)
 
 
+def float_to_decimal(value: float, precision: int = 6) -> Decimal:
+
+    # Convert to decimal (incl. unwanted decimals)
+    pre = Decimal(value)
+
+    # Split into integer and decimal part, return if no decimal part
+    try:
+        ints, decs = str(pre).split(".")
+    except ValueError:
+        return pre
+
+    # Take only {precision} first decimals
+    mag_obs = int(log10(int(decs)))
+    mag_div = max(0, mag_obs - precision + 1)
+    decs = round(int(decs) / 10 ** mag_div)
+
+    # Represent as string with certain decimals precision and strip trailing zeros
+    str_repr = f"{ints}.{decs}".rstrip("0")
+    post = Decimal(str_repr)
+
+    return post
+
+
 def setup_signal_handlers(loop):
     """
     This must be run from the loop in the main thread
@@ -86,18 +112,22 @@ def split_pair(pair: str) -> Tuple:
     raise Exception(message)
 
 
-def length_string_to_seconds(length: str) -> int:
-
+def split_interval(interval: str) -> Tuple[int, str]:
     # Extract quantity and unit
-    quantity = int(length[:-1])
-    unit = length[-1]
+    quantity = int(interval[:-1])
+    unit = interval[-1]
+    return quantity, unit
 
+
+def interval_to_seconds(interval: str) -> int:
+
+    quantity, unit = split_interval(interval)
     # Determine multiplier based on unit
     try:
         multiplier = {"S": 1, "M": 60, "H": 3600, "D": 86400}[unit]
     except KeyError:
         raise ValueError(
-            f"[length_string_to_seconds] length argument {length} unit {unit} not supported"
+            f"[length_string_to_seconds] length argument {interval} unit {unit} not supported"
         )
 
     return quantity * multiplier

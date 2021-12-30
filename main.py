@@ -26,7 +26,7 @@ config = bot.BotConfig(
     data_loader__config=dataloader.DataLoaderConfig(
         type=dataloader.DataLoaderTypes.dummy,
         pairs=["BTC/USDT", "ETH/USDT"],
-        interval_length="5S",
+        interval="5S",
     ),
     visitors__config=[],
     broker__config=broker.BrokerConfig(
