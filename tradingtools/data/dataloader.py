@@ -25,7 +25,7 @@ class DataLoaderConfig:
     interval: str = "1M"
     hist__exchange: str = "Binance"
     hist__parent_path: str = "./data"
-    hist__burn_in_periods: int = 100
+    hist__burn_in_periods: int = 10
     hist__update_tol_interval: str = "5M"
     hist__sleep_interval: str = None
     hist__max_history_interval: str = "100D"
@@ -37,6 +37,12 @@ class DataLoaderConfig:
             self.interval_seconds = 0
         else:
             self.interval_seconds = interval_to_seconds(self.interval)
+
+        # burn in periods to burin_in_seconds
+        if not self.hist__burn_in_periods:
+            self.burn_in_seconds = 0
+        else:
+            self.burn_in_seconds = self.interval_seconds * self.hist__burn_in_periods
 
         # historical__update_tol_length to historical__update_tol_seconds
         if self.hist__update_tol_interval is None:
@@ -50,9 +56,7 @@ class DataLoaderConfig:
         if self.hist__sleep_interval is None:
             self.sleep_seconds = self.interval_seconds
         else:
-            self.sleep_seconds = interval_to_seconds(
-                self.hist__sleep_interval
-            )
+            self.sleep_seconds = interval_to_seconds(self.hist__sleep_interval)
 
         # historical__history_limit_length to historical__history_limit_seconds
         if self.hist__max_history_interval is None:
@@ -91,7 +95,7 @@ class AbstractDataLoader:
 
         t_diff = time.perf_counter() - start_time
         t_sleep = self._config.sleep_seconds - t_diff
-        return t_sleep
+        return max(0, t_sleep)
 
     async def load_async(self) -> AsyncIterator[AbstractData]:
 

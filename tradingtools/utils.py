@@ -12,7 +12,6 @@ from uuid import uuid4
 from math import log10
 
 
-
 try:
     # unix / macos only
     from signal import SIGHUP
@@ -56,6 +55,9 @@ class ColoredLogFormatter(logging.Formatter):
 
 
 def float_to_decimal(value: float, precision: int = 6) -> Decimal:
+
+    if value is None:
+        return None
 
     # Convert to decimal (incl. unwanted decimals)
     pre = Decimal(value)
