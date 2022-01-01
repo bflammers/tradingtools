@@ -6,7 +6,7 @@ from enum import Enum
 
 from ..exchanges import AbstractExchange
 from ...utils import Order, split_pair
-from ...assets import SymbolAsset
+from ...assets import SymbolAsset, AssetTransaction
 
 logger = getLogger(__name__)
 
@@ -58,11 +58,14 @@ class AbstractFillStrategy:
             updated_order = self._exchange.update_order(order, order_response)
 
             # Update assets
-            # TODO: make this transactional
-            base_new = self._base_asset.get_quantity() + updated_order.filled_quantity
-            quote_new = self._quote_asset.get_quantity() - updated_order.cost_settlement
-            self._base_asset.set_quantity(base_new)
-            self._quote_asset.set_quantity(quote_new)
+            # TODO: what happens when an order is filled in pieces?
+            # TODO: should quantity be reserved for each asset? --> not with cancelling outstanding
+            (
+                AssetTransaction()
+                .add(self._base_asset, updated_order.filled_quantity)
+                .subtract(self._quote_asset, updated_order.filled_quantity)
+                .commit()
+            )
 
     def _continue_order(self, value_diff: Decimal):
 
