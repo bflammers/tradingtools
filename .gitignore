@@ -1,8 +1,12 @@
 venv/
-data/
 tempCodeRunnerFile.py
 .vscode/
 .DS_Store
+
+# Ignore data folder, with exceptions
+data/
+!tests/data 
+!tradingtools/data
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
