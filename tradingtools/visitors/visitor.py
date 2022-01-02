@@ -4,6 +4,7 @@ from enum import Enum
 
 class AssetVisitorTypes(Enum):
     dummy = "dummy"
+    logger = "logger"
 
 
 @dataclass
