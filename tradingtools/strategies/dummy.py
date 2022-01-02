@@ -7,6 +7,7 @@ from tradingtools.utils import split_pair
 from .strategy import AbstractStrategy, StrategyConfig
 from ..assets import PortfolioAsset
 from ..data import AbstractData
+from ..utils import float_to_decimal
 
 
 class DummyStrategy(AbstractStrategy):
@@ -17,10 +18,10 @@ class DummyStrategy(AbstractStrategy):
         asset_names = portfolio.get_asset_names()
 
         propensities = [uniform(0.0, 10.0) for _ in asset_names]
-        total_propensity = sum(propensities) 
+        total_propensity = sum(propensities)
 
         proportions = {
-            base: Decimal(propensity / total_propensity)
+            base: float_to_decimal(propensity / total_propensity)
             for base, propensity in zip(asset_names, propensities)
         }
 

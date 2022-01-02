@@ -60,21 +60,22 @@ class AbstractFillStrategy:
             # Update assets
             # TODO: what happens when an order is filled in pieces?
             # TODO: should quantity be reserved for each asset? --> not with cancelling outstanding
-            (
-                AssetTransaction()
-                .add(self._base_asset, updated_order.filled_quantity)
-                .subtract(self._quote_asset, updated_order.filled_quantity)
-                .commit()
-            )
+            if order.side == "buy": # Bought base asset for quote asset
+                (
+                    AssetTransaction()
+                    .add(self._base_asset, updated_order.filled_quantity)
+                    .subtract(self._quote_asset, updated_order.filled_quantity)
+                    .commit()
+                )
+            else: # Sold base asset for quote asset
+                (
+                    AssetTransaction()
+                    .add(self._quote_asset, updated_order.filled_quantity)
+                    .subtract(self._base_asset, updated_order.filled_quantity)
+                    .commit()
+                )
 
-    def _continue_order(self, value_diff: Decimal):
-
-        # Check if there is enough value in quote asset
-        if value_diff > self._quote_asset.get_value():
-            logger.warning(
-                f"[FillStrategy] not enough value in {self._quote_asset.get_name()} to buy {value_diff:0.3f} worth of {self._base_asset.get_name()}"
-            )
-            return False
+    def _continue_order(self, value_diff: Decimal) -> bool:
 
         # Safe get the tolerance
         quote_name = self._quote_asset.get_name()
@@ -88,7 +89,7 @@ class AbstractFillStrategy:
 
         # Compare price difference to tolerance
         if abs(value_diff) < tolerance:
-            logger.info(
+            logger.debug(
                 f"[FillStrategy] value diff of {value_diff:0.3f} below tolerance for {self._market}"
             )
             return False

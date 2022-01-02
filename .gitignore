@@ -2,6 +2,8 @@ venv/
 tempCodeRunnerFile.py
 .vscode/
 .DS_Store
+profiling/
+results/
 
 # Ignore data folder, with exceptions
 data/

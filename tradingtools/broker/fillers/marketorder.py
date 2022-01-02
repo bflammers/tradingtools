@@ -15,27 +15,36 @@ logger = getLogger(__name__)
 class MarketOrderFillStrategy(AbstractFillStrategy):
     async def _generate_orders(self, gap: Decimal) -> AsyncIterator[Order]:
 
+        if gap > Decimal("0.0"):  # Buy on market
+            side = "buy"
+            buy_side = self._base_asset
+            sell_side = self._quote_asset
+        else:  # Sell on market
+            side = "sell"
+            buy_side = self._quote_asset
+            sell_side = self._base_asset
+
         n_retries = 0
+        target = abs(gap)
         filled = Decimal("0")
 
         # Calculate open difference in quantity and value
-        quantity_diff, value_diff = self._determine_diff(gap, filled)
+        order_quantity, order_value = self._determine_diff(target, filled)
 
-        while self._continue_order(value_diff) and n_retries < self._config.max_retries:
+        while (
+            self._continue_order(order_value) and n_retries < self._config.max_retries
+        ):
 
-            if value_diff > self._quote_asset.get_value():
-                logger.warning(f"")
-
-            side = "buy" if quantity_diff > Decimal("0.0") else "sell"
-
-            # Wait 1 second for sell orders to come through
-            if side == "buy":
-                await asyncio.sleep(1)
+            if order_value > sell_side.get_value():
+                logger.warning(
+                    f"[FillStrategy] not enough value in {sell_side.get_name()} to buy {order_value:0.3f} worth of {buy_side.get_name()}"
+                )
+                break
 
             order = Order(
-                symbol=self._base_asset.get_name(),
+                symbol=self._market,
                 side=side,
-                quantity=quantity_diff,
+                quantity=order_quantity,
                 type="market",
                 price=self._base_asset.get_price(),
             )
@@ -44,7 +53,6 @@ class MarketOrderFillStrategy(AbstractFillStrategy):
 
             # Update open difference in quantity and value
             filled += order.filled_quantity
-            quantity_diff, value_diff = self._determine_diff(gap, filled)
+            order_quantity, order_value = self._determine_diff(target, filled)
 
             n_retries += 1
-

@@ -23,6 +23,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+class RunType(Enum):
+    backtest = "backtest"
+    dry_run = "dry_run"
+    live = "live"
+
+
 class Colors(Enum):
     blue = "\033[94m"
     cyan = "\033[96m"
@@ -36,48 +42,50 @@ class Colors(Enum):
 
 class ColoredLogFormatter(logging.Formatter):
 
-    format = (
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
-    )
+    format = "%(asctime)s - %(levelname)s - %(message)s (%(name)s:%(lineno)d)"
 
-    FORMATS = {
-        logging.DEBUG: Colors.cyan.value + format + Colors.reset.value,
-        logging.INFO: Colors.grey.value + format + Colors.reset.value,
-        logging.WARNING: Colors.yellow.value + format + Colors.reset.value,
-        logging.ERROR: Colors.red.value + format + Colors.reset.value,
-        logging.CRITICAL: Colors.bold_red.value + format + Colors.reset.value,
+    DEFAULT = logging.Formatter(format)
+
+    FORMATTERS = {
+        logging.DEBUG: logging.Formatter(
+            Colors.cyan.value + format + Colors.reset.value
+        ),
+        logging.INFO: logging.Formatter(
+            Colors.grey.value + format + Colors.reset.value
+        ),
+        logging.WARNING: logging.Formatter(
+            Colors.yellow.value + format + Colors.reset.value
+        ),
+        logging.ERROR: logging.Formatter(
+            Colors.red.value + format + Colors.reset.value
+        ),
+        logging.CRITICAL: logging.Formatter(
+            Colors.bold_red.value + format + Colors.reset.value
+        ),
     }
 
     def format(self, record):
-        log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt)
+        formatter = self.FORMATTERS.get(record.levelno, self.DEFAULT)
         return formatter.format(record)
+
+
+def round_decimal(value: Decimal, precision: int = 6) -> Decimal:
+
+    if precision < 0:
+        message = "[round_decimal] precision cannot be negative"
+        logger.error(message)
+        raise ValueError(message)
+
+    q = Decimal(f"{'0.' if precision > 0 else ''}{'0'*(precision-1)}1")
+    return value.quantize(q)
 
 
 def float_to_decimal(value: float, precision: int = 6) -> Decimal:
 
     if value is None:
-        return None
+        return value
 
-    # Convert to decimal (incl. unwanted decimals)
-    pre = Decimal(value)
-
-    # Split into integer and decimal part, return if no decimal part
-    try:
-        ints, decs = str(pre).split(".")
-    except ValueError:
-        return pre
-
-    # Take only {precision} first decimals
-    mag_obs = int(log10(int(decs)))
-    mag_div = max(0, mag_obs - precision + 1)
-    decs = round(int(decs) / 10 ** mag_div)
-
-    # Represent as string with certain decimals precision and strip trailing zeros
-    str_repr = f"{ints}.{decs}".rstrip("0")
-    post = Decimal(str_repr)
-
-    return post
+    return round_decimal(Decimal(value), precision)
 
 
 def setup_signal_handlers(loop):
@@ -151,13 +159,23 @@ class Order:
     price_settlement: Decimal = None
     cost_settlement: Decimal = None
     timestamp_settlement: float = None
-    filled_quantity: Decimal = None
+    filled_quantity: Decimal = Decimal("0")
     exchange_order_id: str = None
     fee: Decimal = None
     fee_currency: str = None
     trades: list = None
 
     def __post_init__(self):
+
+        if self.price < Decimal("0"):
+            message = f"[Order] order cannot have a negative price"
+            logger.error(message)
+            raise ValueError(message)
+
+        if self.quantity < Decimal("0"):
+            message = f"[Order] order cannot have a negative quantity"
+            logger.error(message)
+            raise ValueError(message)
 
         if self.timestamp_created is None:
             self.timestamp_created = time()
@@ -166,7 +184,7 @@ class Order:
             self.order_id = uuid4().hex
 
         if self.type == "market" and self.price is not None:
-            logger.warn("[Order] order type is market and price is not None")
+            logger.debug("[Order] order type is market and price is not None")
 
         if self.type == "limit" and self.price is None:
             message = "[Order] order type is limit and price is None"

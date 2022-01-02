@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from tradingtools.broker.exchanges import exchange
 
 from ..assets import AbstractCompositeAsset, PortfolioAsset
-from ..utils import Order, split_pair
+from ..utils import Order, split_pair, RunType
 from .fillers import AbstractFillStrategy, FillStrategyConfig, filler_factory
 from .exchanges import AbstractExchange, ExchangeConfig, exchange_factory
 
@@ -19,9 +19,17 @@ logger = getLogger(__name__)
 
 @dataclass
 class BrokerConfig:
-    backtest: bool
     filler__config: FillStrategyConfig
     exchange__config: ExchangeConfig
+    run_type: RunType = None  # Set by BotConfig
+
+    def __post_init__(self) -> None:
+
+        # Ensure runtype is set to the same value everywhere
+        logger.info(
+            f"[BrokerConfig] setting exchange__config.run_type to {self.exchange__config.run_type}"
+        )
+        self.exchange__config.run_type = self.run_type
 
 
 # TODO: still need a sync method to synchronize assets with exchange state

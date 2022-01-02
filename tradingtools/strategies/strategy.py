@@ -8,6 +8,7 @@ from tradingtools.utils import split_pair
 
 from ..assets import PortfolioAsset
 from ..data import AbstractData
+from ..utils import round_decimal
 
 
 logger = getLogger(__name__)
@@ -37,9 +38,9 @@ class AbstractStrategy:
         self._check_proportions(proportions)
 
         # Pick which markets to buy/sell the assets on
-        market_quantities = self.market_quantities(proportions, portfolio)
+        market_gaps = self.market_gaps(proportions, portfolio)
 
-        return market_quantities
+        return market_gaps
 
     def optimal_proportions(
         self, data: AbstractData, portfolio: PortfolioAsset
@@ -60,43 +61,46 @@ class AbstractStrategy:
             total += proportion
 
         # Round to avoid a total > 1, due to float representation
-        total = round(total, 5)
+        total = round_decimal(total, 4)
 
         if total < Decimal("0") or total > Decimal("1"):
             raise ValueError(
                 f"[Strategy] total of proportions is {total}, not >= 0 and <= 1"
             )
 
-    def _smooth_quantities(
-        self, quantities: Dict[str, Decimal], portfolio: PortfolioAsset = None
+    def _smooth_gaps(
+        self, gaps: Dict[str, Decimal], portfolio: PortfolioAsset = None
     ) -> Dict[str, Decimal]:
 
-        for pair, quantity in quantities.items():
+        for pair, gap in gaps.items():
 
             base, quote = split_pair(pair)
             asset = portfolio.get_asset(base)
 
+            # Round to avoid gaps with a very large number of decimal places
+            gaps[pair] = round_decimal(gap)
+
             # Avoiding lots of small assets - check if value diff from zero
             # is higher than threshold. If not, smooth to zero
-            value = asset.get_price(quote) * quantity
+            value = asset.get_price(quote) * gap
             if abs(value) < self._config.smooth_value_base_thr:
-                quantities[pair] = Decimal("0.0")
+                gaps[pair] = Decimal("0.0")
 
             # Avoiding many small orders - check if value diff from current
             # is higher than threshold. If not, smooth to current quantity
-            value_diff = asset.get_value_difference(quantity, quote)
+            value_diff = asset.get_value_difference(gap, quote)
             if abs(value_diff) < self._config.smooth_value_diff_thr:
-                quantities[pair] = asset.get_quantity()
+                gaps[pair] = Decimal("0.0")
 
-        return quantities
+        return gaps
 
-    def market_quantities(
+    def market_gaps(
         self, proportions: Dict[str, Decimal], portfolio: PortfolioAsset
     ) -> Dict[str, Decimal]:
 
         total_value = portfolio.get_value()
 
-        quantities = {}
+        gaps = {}
         for base, proportion in proportions.items():
 
             # Get asset, determine market
@@ -114,9 +118,9 @@ class AbstractStrategy:
 
             # Determine quantity difference, add to dict
             quantity_diff = target_quantity - asset.get_quantity()
-            quantities[market] = quantity_diff
+            gaps[market] = quantity_diff
 
         # Smooth quantities to avoid many small jumps
-        quantities = self._smooth_quantities(quantities, portfolio)
+        gaps = self._smooth_gaps(gaps, portfolio)
 
-        return quantities
+        return gaps

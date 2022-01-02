@@ -67,6 +67,9 @@ class DataFrameData(AbstractData):
         prices = df_latest["close_last"].to_list()
         prices = [float_to_decimal(price) for price in prices]
 
+        current_date = df["date"].dt.max().isoformat()
+        logger.info(f"[get_latest] current date: {current_date}")
+
         return dict(zip(pairs, prices))
 
     def _aggregate(self, df: pl.DataFrame, interval: str) -> pl.DataFrame:

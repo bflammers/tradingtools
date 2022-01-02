@@ -6,16 +6,16 @@ from time import time
 from ccxt.async_support import Exchange
 
 from tradingtools.broker import exchanges
-from tradingtools.utils import Order
+from tradingtools.utils import Order, RunType
 
 dummy_config = exchanges.ExchangeConfig(
-    type=exchanges.ExchangeTypes.dummy, backtest=True
+    type=exchanges.ExchangeTypes.dummy, run_type=RunType.dry_run
 )
 
 
 binance_config = exchanges.ExchangeConfig(
     type=exchanges.ExchangeTypes.binance,
-    backtest=True,
+    run_type=True,
     credentials={"api_key": "1234", "secret": "abcd"},
 )
 

@@ -12,7 +12,7 @@ from tradingtools import data
 from tradingtools.broker import exchanges, fillers
 from tradingtools.data import dataloader
 
-from tradingtools.utils import setup_signal_handlers
+from tradingtools.utils import setup_signal_handlers, RunType
 
 
 # Set up logging
@@ -22,22 +22,24 @@ logging.basicConfig(level=logging.INFO, handlers=[terminal_handler])
 
 
 config = bot.BotConfig(
+    run_type=RunType.backtest,
     strategy__config=strategies.StrategyConfig(type=strategies.StrategyTypes.dummy),
     data_loader__config=dataloader.DataLoaderConfig(
-        type=dataloader.DataLoaderTypes.dummy,
+        type=dataloader.DataLoaderTypes.historical,
         pairs=["BTC/USDT", "ETH/USDT"],
-        interval="5S",
+        interval="1M",
+        burn_in_interval="300D",
+        hist__sleep_interval="0S",
+        max_history_interval="60M",
     ),
-    visitors__config=[],
+    visitors__config=[
+        visitors.LogAssetVisitorConfig(visitors.AssetVisitorTypes.logger)
+    ],
     broker__config=broker.BrokerConfig(
-        backtest=True,
         filler__config=fillers.FillStrategyConfig(type=fillers.FillerTypes.marketorder),
-        exchange__config=exchanges.ExchangeConfig(
-            type=exchanges.ExchangeTypes.dummy, backtest=True
-        ),
+        exchange__config=exchanges.ExchangeConfig(type=exchanges.ExchangeTypes.dummy),
     ),
 )
-
 
 bot = bot.Bot(config)
 

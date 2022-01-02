@@ -9,7 +9,7 @@ from datetime import datetime
 
 from ccxt.async_support import Exchange
 
-from ...utils import Order
+from ...utils import Order, RunType, float_to_decimal
 
 
 logger = getLogger(__name__)
@@ -24,7 +24,21 @@ class ExchangeTypes(Enum):
 class ExchangeConfig:
     type: ExchangeTypes
     credentials: dict = None
-    backtest: bool = True
+    run_type: RunType = None  # Set by BrokerConfig
+
+    def __post_init__(self):
+
+        if self.run_type is RunType.live:
+            self._live_trading_confirmation()
+
+    def _live_trading_confirmation(self):
+
+        confirmation = input(
+            "[Broker] RunType is LIVE, are you sure you want to perform actual trades? (y)"
+        )
+
+        if confirmation != "y":
+            raise Exception("Live trading aborted")
 
 
 class AbstractExchange:
@@ -38,19 +52,6 @@ class AbstractExchange:
         # Factories
         self.exchange: Exchange = self._exchange_factory()
 
-        # Checks
-        self._live_trading_confirmation()
-
-    def _live_trading_confirmation(self):
-
-        if not self._config.backtest:
-            confirmation = input(
-                "[Broker] backtest = False, are you sure you want to perform actual trades? (y)"
-            )
-
-            if confirmation != "y":
-                raise Exception("Live trading aborted")
-
     def _exchange_factory(self):
         raise NotImplementedError(
             "[AbstractExchange] not implemented for abstract class"
@@ -58,11 +59,9 @@ class AbstractExchange:
 
     async def place_order(self, order: Order) -> dict:
 
-        params = {
-            "test": self._config.backtest,  # test if it's valid, but don't actually place it
-        }
+        params = {"test": False if self._config.run_type is RunType.live else True}
 
-        logger.info(f"[Broker] placing order {order.order_id}")
+        logger.debug(f"[Broker] placing order {order.order_id}")
 
         # Create market order through ccxt with specified exchange
         order_response = await self.exchange.create_order(
@@ -74,19 +73,21 @@ class AbstractExchange:
             params=params,
         )
 
-        logger.debug(f"[Broker] order {order.order_id} response: \n{pformat(order_response)}")
+        logger.debug(
+            f"[Broker] order {order.order_id} response: \n{pformat(order_response)}"
+        )
 
         return order_response
 
     def update_order(self, order: Order, order_response: dict):
 
         order.update(
-            price=Decimal(order_response["price"]),
-            cost=Decimal(order_response["cost"]),
+            price=float_to_decimal(order_response["price"]),
+            cost=float_to_decimal(order_response["cost"]),
             timestamp=datetime.fromtimestamp(order_response["timestamp"] / 1000),
-            filled_quantity=Decimal(order_response["filled"]),
+            filled_quantity=float_to_decimal(order_response["filled"]),
             exchange_order_id=order_response["id"],
-            fee=Decimal(order_response["fee"]["cost"]),
+            fee=float_to_decimal(order_response["fee"]["cost"]),
             fee_currency=order_response["fee"]["currency"],
             trades=order_response["trades"],
             status=order_response["status"],

@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import List
 from logging import getLogger
 
-from tradingtools.utils import split_pair
+from tradingtools.utils import RunType, split_pair
 
 from .assets import PortfolioAsset, SymbolAsset
 from .broker import Broker, BrokerConfig
@@ -23,7 +23,7 @@ class BotConfig:
     data_loader__config: dict
     visitors__config: List[dict]
     broker__config: BrokerConfig
-    backtest: bool = True
+    run_type: RunType = RunType.backtest
     default_quote_symbol: str = "USDT"
     default_quote_starting_capital: Decimal = Decimal("1000")
     assets__time_diff_tol_sec: float = 180.0
@@ -31,10 +31,10 @@ class BotConfig:
     def __post_init__(self) -> None:
 
         # Ensure backtest is set to the same value everywhere
-        if self.backtest != self.broker__config.backtest:
-            logger.error(
-                f"[BotConfig] backtest in broker_config = {self.broker__config.backtest}"
-            )
+        logger.info(
+            f"[BotConfig] setting broker__config.run_type to {self.broker__config.run_type}"
+        )
+        self.broker__config.run_type = self.run_type
 
 
 class Bot:
@@ -79,6 +79,7 @@ class Bot:
             # Evaluate strategy, results in the gaps that need to be filled on
             # different markets to top up to assets to the uptimal quantities
             market_gaps = self._strategy.evaluate(data, self._portfolio)
+            logger.info(f"[Bot] market gaps: {market_gaps}")
 
             # Make orders to fill market gaps in portfolio
             await self._broker.fill(market_gaps, self._portfolio)
@@ -135,7 +136,7 @@ class Bot:
         asset.set_price(Decimal("1.0"))
 
         # If backtest, add starting capital
-        if self._config.backtest:
+        if self._config.run_type is RunType.backtest:
             asset.set_quantity(self._config.default_quote_starting_capital)
 
         self._portfolio.add_asset(asset)
