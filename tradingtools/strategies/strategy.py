@@ -34,7 +34,7 @@ class AbstractStrategy:
     ) -> Dict[str, Decimal]:
 
         # Determine optimal proportions
-        proportions = self.optimal_proportions(data, portfolio)
+        proportions = self.optimal_proportions(data)
         self._check_proportions(proportions)
 
         # Pick which markets to buy/sell the assets on
@@ -42,9 +42,7 @@ class AbstractStrategy:
 
         return market_gaps
 
-    def optimal_proportions(
-        self, data: AbstractData, portfolio: PortfolioAsset
-    ) -> Dict[str, Decimal]:
+    def optimal_proportions(self, data: AbstractData) -> Dict[str, Decimal]:
         raise NotImplementedError
 
     @staticmethod

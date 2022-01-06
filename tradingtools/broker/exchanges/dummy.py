@@ -27,7 +27,7 @@ class DummyExchange(AbstractExchange):
     async def place_order(self, order: Order) -> dict:
 
         logger.debug(
-            f"[DummyExchange] placing order {order.order_id}: \n{pformat(order)}"
+            f"[DummyExchange] placing order {order.order_id}: \n{order}"
         )
 
         if self._config.run_type is RunType.dry_run:
@@ -55,7 +55,7 @@ class DummyExchange(AbstractExchange):
         }
 
         logger.debug(
-            f"[DummyExchange] order {order.order_id} response: \n{pformat(order_response)}"
+            f"[DummyExchange] order {order.order_id} response: \n{order_response}"
         )
 
         return order_response

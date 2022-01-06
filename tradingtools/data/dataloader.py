@@ -23,7 +23,7 @@ class DataLoaderConfig:
     type: DataLoaderTypes
     pairs: List[str]
     interval: str = "1M"
-    burn_in_interval: int = 10
+    burn_in_interval: int = 0
     update_tol_interval: str = "5M"
     max_history_interval: str = "100D"
     hist__exchange: str = "Binance"
@@ -54,7 +54,11 @@ class DataLoaderConfig:
         self._set_interval_seconds(
             "sleep_seconds", self.hist__sleep_interval, self.interval_seconds
         )
-        self._set_interval_seconds("max_history_seconds", self.max_history_interval)
+        self._set_interval_seconds(
+            "max_history_seconds",
+            self.max_history_interval,
+            max(self.interval_seconds, self.update_tol_seconds),
+        )
 
 
 class AbstractData:
@@ -77,6 +81,9 @@ class AbstractDataLoader:
 
     def get_pairs(self) -> List[str]:
         return self._config.pairs
+
+    def get_complete(self) -> AbstractData:
+        raise NotImplementedError
 
     def data_factory(self) -> AbstractData:
         raise NotImplementedError

@@ -153,6 +153,11 @@ class SymbolAsset(AbstractCompositeAsset):
         return price_dict["price"]
 
     def set_price(self, price: Decimal, quote: str = None) -> None:
+        
+        if price is None:
+            logger.warning(f"[set_price] received None price for asset {self.get_name()}")
+            return
+        
         if price < Decimal("0"):
             message = f"[Asset] cannot set negative price {price} for {self._name}"
             logger.error(message)

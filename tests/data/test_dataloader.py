@@ -40,7 +40,7 @@ class TestAsyncHistoricalDataLoader(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(data, DataFrameData)
             i += 1
 
-        # Data runs from 2021-09-04 01:00:00 to 2021-09-04 01:10:00, so 10 iterations
+        # Data runs from 2021-09-04 01:00:00 to 2021-09-04 01:10:00, so 0 iterations
         self.assertEqual(i, 10)
 
 
@@ -110,7 +110,7 @@ class TestHistoricalDataLoader(unittest.TestCase):
             pairs=pairs,
             interval="1M",
             burn_in_interval=0,
-            update_tol_interval="1M",
+            update_tol_interval="2M",
             hist__parent_path=dummy_data_path,
             hist__sleep_interval="0M",
         )

@@ -3,7 +3,7 @@ import polars as pl
 
 from logging import currentframe, getLogger
 from decimal import Decimal
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from random import uniform
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -24,53 +24,37 @@ class DataFrameData(AbstractData):
     def __init__(self, config: DataLoaderConfig) -> None:
         super().__init__(config)
         self._df = None
-        self._current_datetime = None
-
-    def set_up(self, df: pl.DataFrame, current_datetime: datetime) -> None:
-        self._current_datetime = current_datetime
-        self._df = self._add_missing_timestamps(df)
-
-    def _add_missing_timestamps(self, df: pl.DataFrame):
-
-        # assumes a 1M grain in data
-
-        # Prepare skeleton with all timestamps
-        df_skeleton = prepare_skeleton(
-            from_datetime=df["date"].dt.min(),
-            to_datetime=self._current_datetime,
-            interval="1M",
-            pairs=self.get_pairs(),
+        # ASSUMES A 1M GRAIN
+        self._n_rows_update_tol = max(1, self._config.update_tol_seconds // 60) * len(
+            self.get_pairs()
         )
 
-        # Join df to skeleton to keep missings explicitly
-        # First truncate dates to 1M in case there are any sub-minute values in date
-        pl_grain = to_polars_duration("1M")
-        df = df.with_column(pl.col("date").dt.truncate(pl_grain))
-        df = df_skeleton.join(df, on=["symbol", "date"], how="left")
+    def get_pairs(self) -> List[str]:
+        return self._config.pairs
 
-        return df
+    def set_up(self, df: pl.DataFrame) -> None:
+        self._df = df
 
     def get_latest(self) -> Dict[str, Decimal]:
 
-        if not self._config.interval_seconds:
-            df_latest = self._df.groupby("symbol").agg(pl.col("close").last())
-        else:
+        # Select last known closing prices
+        df_latest = (
+            self._df.tail(self._n_rows_update_tol)
+            .groupby("symbol", maintain_order=True)
+            .agg(pl.col("close").drop_nulls().last())
+        )
 
-            # Filter out everything outside of tolerance period
-            df = filter_period(self._df, length_seconds=self._config.update_tol_seconds)
+        # Collect prices, convert prices to decimal, collect
+        latest_prices = df_latest.to_dict(as_series=False)
+        prices = dict(
+            zip(
+                latest_prices["symbol"],
+                latest_prices["close_last"],
+            )
+        )
+        latest = {pair: float_to_decimal(prices.get(pair)) for pair in self.get_pairs()}
 
-            # Select last known closing prices
-            df_latest = df.groupby("symbol").agg(pl.col("close").drop_nulls().last())
-
-        # Collect pairs and prices, convert prices to decimal
-        pairs = df_latest["symbol"].to_list()
-        prices = df_latest["close_last"].to_list()
-        prices = [float_to_decimal(price) for price in prices]
-
-        current_date = df["date"].dt.max().isoformat()
-        logger.info(f"[get_latest] current date: {current_date}")
-
-        return dict(zip(pairs, prices))
+        return latest
 
     def _aggregate(self, df: pl.DataFrame, interval: str) -> pl.DataFrame:
 
@@ -136,24 +120,21 @@ class HistoricalDataLoader(AbstractDataLoader):
 
     def __init__(self, config: DataLoaderConfig) -> None:
         super().__init__(config)
-        self._df: pl.DataFrame = self._load_data()
-        self._min_datetime = self._df["date"].dt.min()
-        self._max_datetime = self._df["date"].dt.max()
-        self._current_datetime = self._get_start_datetime()
 
-    def _get_start_datetime(self) -> datetime:
-        start_datetime = self._min_datetime + timedelta(
+        # Load the data from disk and add missing timestamps
+        self._df: pl.DataFrame = self._load_data()
+
+        # Add missing timestamps
+        self._df = self._add_missing_timestamps()
+
+        # Set attributes needed for iterating through the data
+        # ASSUMES A 1M GRAIN !!
+        self._current_datetime = self._df["date"].dt.min() + timedelta(
             seconds=self._config.burn_in_seconds
         )
-
-        if start_datetime > self._max_datetime:
-            raise ValueError(
-                f"[_get_start_datetime] start_datetime {start_datetime} is later than max_datetime {self._max_datetime}"
-            )
-        return start_datetime
-
-    def _prepare_data_skeleton(self, df: pl):
-        pass
+        self._idx_incr = self._config.interval_seconds // 60 * len(self.get_pairs())
+        self._idx_diff = self._config.max_history_seconds // 60 * len(self.get_pairs())
+        self._idx_from, self._idx_to = self._set_starting_idx()
 
     def _load_data(self):
         df = None
@@ -170,6 +151,44 @@ class HistoricalDataLoader(AbstractDataLoader):
                 df = pl.concat([df, df_next])
 
         df = df.sort(["date", "symbol"])
+        return df
+
+    def _set_starting_idx(self) -> Tuple[int, int]:
+
+        idx_to = (self._df["date"] == self._current_datetime).arg_true().max() + 1
+        idx_from = max(0, idx_to - self._idx_diff)
+
+        return idx_from, idx_to
+
+    def _increment_idx(self) -> None:
+
+        self._idx_to += self._idx_incr
+        self._idx_from += self._idx_incr
+
+        self._current_datetime += timedelta(seconds=self._config.interval_seconds)
+        logger.info(f"[data_factory] current date: {self._current_datetime}")
+
+        if self._idx_to - self._idx_from != self._idx_diff:
+            self._idx_from = max(0, self._idx_to - self._idx_diff)
+
+    def _add_missing_timestamps(self):
+
+        # !! ASSUMES A 1M GRAIN !!
+
+        # Prepare skeleton with all timestamps
+        df_skeleton = prepare_skeleton(
+            from_datetime=self._df["date"].dt.min(),
+            to_datetime=self._df["date"].dt.max(),
+            interval="1M",
+            pairs=self.get_pairs(),
+        )
+
+        # Join df to skeleton to keep missings explicitly
+        # First truncate dates to 1M in case there are any sub-minute values in date
+        pl_grain = to_polars_duration("1M")
+        df = self._df.with_column(pl.col("date").dt.truncate(pl_grain))
+        df = df_skeleton.join(df, on=["symbol", "date"], how="left")
+
         return df
 
     def _get_data_paths(self):
@@ -189,23 +208,29 @@ class HistoricalDataLoader(AbstractDataLoader):
 
         return paths
 
-    def data_factory(self) -> DataFrameData:
-
-        if self._current_datetime > self._max_datetime:
-            return None
-
-        # Filter out everything later than current_datetime and before max history period
-        df = filter_period(
-            self._df,
-            to_datetime=self._current_datetime,
-            length_seconds=self._config.max_history_seconds,
-        )
+    def get_complete(self) -> DataFrameData:
 
         # Create data object
         data = DataFrameData(self._config)
-        data.set_up(df=df, current_datetime=self._current_datetime)
+        data.set_up(df=self._df)
 
-        # Increment current datetime
-        self._current_datetime += timedelta(seconds=self._config.interval_seconds)
+        return data
+
+    def data_factory(self) -> DataFrameData:
+
+        if self._idx_to > self._df.shape[0]:
+            return None
+
+        # Filter out everything later than current_datetime and before max history period
+        df = self._df[self._idx_from : self._idx_to]
+
+        # Create data object
+        data = DataFrameData(self._config)
+        data.set_up(df=df)
+
+        assert self._current_datetime == df["date"].dt.max(), "date not matching"
+
+        # Increment current idx
+        self._increment_idx()
 
         return data

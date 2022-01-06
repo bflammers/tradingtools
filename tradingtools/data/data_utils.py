@@ -39,7 +39,7 @@ def prepare_skeleton(
         else:
             df_skel = pl.concat([df_skel, df_next])
 
-    # Sort 
+    # Sort
     df_skel = df_skel.sort(["date", "symbol"])
 
     return df_skel
@@ -66,4 +66,3 @@ def filter_period(
         df = df.filter(pl.col("date") >= from_datetime)
 
     return df
-

@@ -26,7 +26,7 @@ config = bot.BotConfig(
     strategy__config=strategies.StrategyConfig(type=strategies.StrategyTypes.dummy),
     data_loader__config=dataloader.DataLoaderConfig(
         type=dataloader.DataLoaderTypes.historical,
-        pairs=["BTC/USDT", "ETH/USDT"],
+        pairs=["BTC/USDT", "ETH/USDT", "DOT/USDT", "ADA/USDT", "XLM/USDT", "XRP/USDT"],
         interval="1M",
         burn_in_interval="300D",
         hist__sleep_interval="0S",

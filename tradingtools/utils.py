@@ -167,7 +167,7 @@ class Order:
 
     def __post_init__(self):
 
-        if self.price < Decimal("0"):
+        if self.price is not None and self.price < Decimal("0"):
             message = f"[Order] order cannot have a negative price"
             logger.error(message)
             raise ValueError(message)

@@ -45,6 +45,7 @@ class AbstractExchange:
 
     exchange: Exchange
     _exchange_name: str = None
+    _exchange_fee: Decimal = Decimal("0.001")
 
     def __init__(self, config: ExchangeConfig) -> None:
         self._config = config
@@ -73,9 +74,7 @@ class AbstractExchange:
             params=params,
         )
 
-        logger.debug(
-            f"[Broker] order {order.order_id} response: \n{pformat(order_response)}"
-        )
+        logger.debug(f"[Broker] order {order.order_id} response: \n{order_response}")
 
         return order_response
 

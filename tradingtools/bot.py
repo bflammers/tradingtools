@@ -72,6 +72,9 @@ class Bot:
             # Update prices
             prices = data.get_latest()
             self._portfolio.update_prices(prices)
+            
+            # Log portfolio
+            logger.info(f"\n[Bot] portfolio: {self._portfolio}")
 
             # Apply visitors
             self._visit_portfolio()
@@ -79,13 +82,11 @@ class Bot:
             # Evaluate strategy, results in the gaps that need to be filled on
             # different markets to top up to assets to the uptimal quantities
             market_gaps = self._strategy.evaluate(data, self._portfolio)
-            logger.info(f"[Bot] market gaps: {market_gaps}")
+            logger.debug(f"[Bot] market gaps: {market_gaps}")
 
             # Make orders to fill market gaps in portfolio
             await self._broker.fill(market_gaps, self._portfolio)
 
-            # Log portfolio
-            logger.info(f"\n[Bot] portfolio: {self._portfolio}")
 
     def _visit_portfolio(self) -> None:
         for visitor in self._visitors:

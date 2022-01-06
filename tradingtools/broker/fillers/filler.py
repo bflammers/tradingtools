@@ -1,12 +1,12 @@
 from decimal import Decimal
-from typing import AsyncIterator, Dict, Tuple
+from typing import AsyncGenerator, AsyncIterator, Dict, Tuple
 from logging import getLogger
 from dataclasses import dataclass, field
 from enum import Enum
 
 from ..exchanges import AbstractExchange
 from ...utils import Order, split_pair
-from ...assets import SymbolAsset, AssetTransaction
+from ...assets import AbstractCompositeAsset, SymbolAsset, AssetTransaction
 
 logger = getLogger(__name__)
 
@@ -60,17 +60,17 @@ class AbstractFillStrategy:
             # Update assets
             # TODO: what happens when an order is filled in pieces?
             # TODO: should quantity be reserved for each asset? --> not with cancelling outstanding
-            if order.side == "buy": # Bought base asset for quote asset
+            if order.side == "buy":  # Bought base asset for quote asset
                 (
                     AssetTransaction()
                     .add(self._base_asset, updated_order.filled_quantity)
-                    .subtract(self._quote_asset, updated_order.filled_quantity)
+                    .subtract(self._quote_asset, updated_order.cost_settlement)
                     .commit()
                 )
-            else: # Sold base asset for quote asset
+            else:  # Sold base asset for quote asset
                 (
                     AssetTransaction()
-                    .add(self._quote_asset, updated_order.filled_quantity)
+                    .add(self._quote_asset, updated_order.cost_settlement)
                     .subtract(self._base_asset, updated_order.filled_quantity)
                     .commit()
                 )
@@ -99,7 +99,8 @@ class AbstractFillStrategy:
     def _determine_diff(self, target: Decimal, filled: Decimal) -> Tuple[Decimal]:
         quantity_diff = target - filled
         value_diff = quantity_diff * self._base_asset.get_price(self._quote_name)
-        return quantity_diff, value_diff
+        order_cost = value_diff * (Decimal("1") + self._exchange._exchange_fee)
+        return quantity_diff, value_diff, order_cost
 
-    async def _generate_orders(quantity: Decimal) -> AsyncIterator[Order]:
+    async def _generate_orders(quantity: Decimal) -> AsyncGenerator[Order, None]:
         raise NotImplementedError
